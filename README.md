@@ -6,10 +6,6 @@
 
 This is Lambda. My team's project for AI1220: a remake of Overleaf with AI features.
 
-It's collaborative LaTeX workspace built for drafting technical documents with less friction. 
-
-> **Best for:** academic writing, research notes, technical reports, and collaborative document workflows.
-
 ## Key Features
 
 - **Role-aware collaboration** with `owner`, `editor`, and `viewer` permissions
