@@ -1,8 +1,4 @@
-<p align="center">
-<img width="100%" src="banner.png" />
-</p>
-
-## Lambda Editor
+<img alt="Lambda Editor" width="50%" src="logo.png" />
 
 This is Lambda. My team's project for AI1220: a remake of Overleaf with AI features.
 
@@ -20,6 +16,10 @@ This is Lambda. My team's project for AI1220: a remake of Overleaf with AI featu
 - **Version history** with named snapshots and one-click restore
 - **PDF preview pipeline** that compiles LaTeX on demand and surfaces logs in the UI
 - **Shared PDF preview updates** so a fresh compile result is pushed to other clients viewing the same document
+
+<p align="center">
+<img width="100%" src="banner.png" />
+</p>
 
 ## Tech Stack
 
