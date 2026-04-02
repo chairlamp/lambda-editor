@@ -10,8 +10,8 @@ from __future__ import annotations
 import asyncio
 from typing import Dict, Optional
 
-import y_py as Y
 from fastapi import WebSocket, WebSocketDisconnect
+from pycrdt import Doc, Text, get_state
 from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
@@ -74,29 +74,31 @@ def _msg_update(upd: bytes) -> bytes:
 class _Room:
     def __init__(self, doc_id: str, initial_content: str) -> None:
         self.doc_id = doc_id
-        self.ydoc = Y.YDoc()
+        self.ydoc = Doc()
         self._clients: Dict[str, WebSocket] = {}
         self._lock = asyncio.Lock()
         self._save_task: Optional[asyncio.Task] = None
 
-        if initial_content:
-            ytext = self.ydoc.get_text("content")
-            with self.ydoc.begin_transaction() as txn:
-                ytext.insert(txn, 0, initial_content)
+        self.ydoc["content"] = Text(initial_content)
+
+    def _text(self) -> Text:
+        return self.ydoc.get("content", type=Text)
+
+    def _state_vector(self) -> bytes:
+        return get_state(self.ydoc.get_update())
 
     def get_text(self) -> str:
-        return str(self.ydoc.get_text("content"))
+        return str(self._text())
 
     async def replace_content(self, new_content: str) -> None:
         """Replace all document text and broadcast the delta to every client."""
-        ytext = self.ydoc.get_text("content")
-        old_sv = Y.encode_state_vector(self.ydoc)
-        current_len = len(str(ytext))
-        with self.ydoc.begin_transaction() as txn:
-            if current_len:
-                ytext.delete(txn, 0, current_len)
-            ytext.insert(txn, 0, new_content)
-        delta = Y.encode_state_as_update(self.ydoc, old_sv)
+        ytext = self._text()
+        old_sv = self._state_vector()
+        with self.ydoc.transaction():
+            ytext.clear()
+            if new_content:
+                ytext += new_content
+        delta = self.ydoc.get_update(old_sv)
         await self._broadcast(_msg_update(delta))
 
     async def add(self, cid: str, ws: WebSocket) -> None:
@@ -215,7 +217,7 @@ async def handle_yjs_room(websocket: WebSocket, doc_id: str, user_id: str) -> No
     await room.add(user_id, websocket)
 
     # Kick off sync: send our state vector so the client can send us what we're missing
-    sv = Y.encode_state_vector(room.ydoc)
+    sv = room._state_vector()
     await websocket.send_bytes(_msg_step1(sv))
 
     try:
@@ -240,7 +242,7 @@ async def handle_yjs_room(websocket: WebSocket, doc_id: str, user_id: str) -> No
                 if sync_type == _STEP1:
                     # Client sent its state vector; reply with everything it's missing
                     try:
-                        diff = Y.encode_state_as_update(room.ydoc, payload)
+                        diff = room.ydoc.get_update(payload)
                         await websocket.send_bytes(_msg_step2(diff))
                     except Exception:
                         pass
@@ -248,7 +250,7 @@ async def handle_yjs_room(websocket: WebSocket, doc_id: str, user_id: str) -> No
                 elif sync_type in (_STEP2, _UPDATE):
                     if not read_only:
                         try:
-                            Y.apply_update(room.ydoc, payload)
+                            room.ydoc.apply_update(payload)
                         except Exception:
                             continue
                         await room.schedule_save()

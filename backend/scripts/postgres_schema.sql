@@ -42,9 +42,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS ix_project_invites_token ON project_invites (t
 CREATE TABLE IF NOT EXISTS documents (
     id VARCHAR PRIMARY KEY,
     title VARCHAR NOT NULL,
+    path VARCHAR NOT NULL DEFAULT 'Untitled Document',
+    kind VARCHAR NOT NULL DEFAULT 'latex',
     content TEXT NOT NULL,
     project_id VARCHAR NOT NULL REFERENCES projects (id),
     owner_id VARCHAR NOT NULL REFERENCES users (id),
+    source_filename VARCHAR,
+    mime_type VARCHAR,
+    storage_path TEXT,
+    file_size INTEGER,
     content_revision INTEGER NOT NULL DEFAULT 0,
     compile_success BOOLEAN,
     compile_pdf_base64 TEXT,
@@ -53,10 +59,16 @@ CREATE TABLE IF NOT EXISTS documents (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS compile_success BOOLEAN;
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS compile_pdf_base64 TEXT;
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS compile_log TEXT;
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_revision INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS documents ADD COLUMN IF NOT EXISTS content_revision INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS documents ADD COLUMN IF NOT EXISTS path VARCHAR NOT NULL DEFAULT 'Untitled Document';
+ALTER TABLE IF EXISTS documents ADD COLUMN IF NOT EXISTS kind VARCHAR NOT NULL DEFAULT 'latex';
+ALTER TABLE IF EXISTS documents ADD COLUMN IF NOT EXISTS source_filename VARCHAR;
+ALTER TABLE IF EXISTS documents ADD COLUMN IF NOT EXISTS mime_type VARCHAR;
+ALTER TABLE IF EXISTS documents ADD COLUMN IF NOT EXISTS storage_path TEXT;
+ALTER TABLE IF EXISTS documents ADD COLUMN IF NOT EXISTS file_size INTEGER;
+ALTER TABLE IF EXISTS documents ADD COLUMN IF NOT EXISTS compile_success BOOLEAN;
+ALTER TABLE IF EXISTS documents ADD COLUMN IF NOT EXISTS compile_pdf_base64 TEXT;
+ALTER TABLE IF EXISTS documents ADD COLUMN IF NOT EXISTS compile_log TEXT;
 
 CREATE TABLE IF NOT EXISTS document_versions (
     id VARCHAR PRIMARY KEY,

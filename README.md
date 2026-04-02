@@ -30,7 +30,7 @@ This is Lambda. My team's project for AI1220: a remake of Overleaf with AI featu
 | Backend | FastAPI, SQLAlchemy async, PostgreSQL, WebSockets |
 | AI | OpenAI Responses API for tool-enabled chat, OpenAI streaming for rewrite/generation actions, Google Cloud Translation API for translation tool calls |
 | Auth | Redis-backed server-side sessions with HTTP-only cookies |
-| Collaboration | Yjs CRDT (y-py on server, y-websocket + y-monaco on client), Redis pub/sub for presence and project events |
+| Collaboration | Yjs CRDT (`pycrdt` on server, `y-websocket` + `y-monaco` on client), Redis pub/sub for presence and project events |
 | Output | Rendered export to `PDF`, `DVI`, and `PS` via `pdflatex`, `xelatex`, `lualatex`, or `tectonic` |
 | Default storage | PostgreSQL via `postgresql+asyncpg` |
 
@@ -123,7 +123,7 @@ This script:
 
 Y.js document syncing is handled by the backend directly rather than by a separate collaboration service. FastAPI exposes a dedicated binary WebSocket endpoint at `/ws/{doc_id}/sync`, and authenticated clients connect to it through `y-websocket` from the frontend.
 
-For each open document, the backend creates or reuses an in-memory `Y.Doc` backed by `y-py`. On first connection, that `Y.Doc` is initialized from the document content stored in PostgreSQL. Incoming Y.js updates are applied on the server, rebroadcast to the other collaborators in the same room, and persisted back to PostgreSQL with a short debounce so the database is not written on every keystroke.
+For each open document, the backend creates or reuses an in-memory `Y.Doc` backed by `pycrdt`. On first connection, that `Y.Doc` is initialized from the document content stored in PostgreSQL. Incoming Y.js updates are applied on the server, rebroadcast to the other collaborators in the same room, and persisted back to PostgreSQL with a short debounce so the database is not written on every keystroke.
 
 The Y.js sync channel is separate from the existing JSON WebSocket channel at `/ws/{doc_id}`. The JSON socket still handles presence, cursor state, AI chat relay, and compile-result broadcasts, while the Y.js socket is responsible only for CRDT document content synchronization. Backend permission checks still apply at connection time, and `viewer` users are kept read-only by dropping sync updates server-side.
 
@@ -143,8 +143,8 @@ The implementation uses two WebSocket connections per open document:
 | JSON channel | `/ws/{doc_id}` | JSON text frames | Presence, cursors, AI chat relay, compile results, title |
 | CRDT channel | `/ws/{doc_id}/sync` | Binary y-websocket protocol | Document text sync |
 
-**Server side (`yjs_handler.py`)** - written in Python using `y-py` (Python bindings to the Yrs Rust library):
-1. One `Y.YDoc` is kept in memory per open document, initialized from `doc.content` in PostgreSQL on first connection.
+**Server side (`yjs_handler.py`)** - written in Python using `pycrdt`:
+1. One `Doc` is kept in memory per open document, initialized from `doc.content` in PostgreSQL on first connection.
 2. On client connect the server sends `[SYNC, STEP1, state_vector]`; the client responds with the updates it has that the server is missing, and the server replies with what the client is missing (`STEP2`). After this exchange both sides are identical.
 3. Real-time edits arrive as `[SYNC, UPDATE, update_bytes]`, are applied with `Y.apply_update`, and rebroadcast to all other clients in the same room.
 4. Saves are debounced (2 s) to avoid hammering PostgreSQL on every keystroke; a final save runs when the last client leaves.
