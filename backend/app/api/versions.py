@@ -14,6 +14,7 @@ from app.models.user import User
 from app.api.auth import get_current_user
 from app.api.projects import _require_project
 from app.websocket.manager import manager
+from app.websocket import yjs_handler
 
 router = APIRouter(
     prefix="/projects/{project_id}/documents/{doc_id}/versions",
@@ -166,6 +167,9 @@ async def restore_version(
     doc.content = ver.content
     doc.content_revision += 1
     await db.commit()
+
+    # Push restored content to any open Yjs rooms
+    await yjs_handler.invalidate_room(doc_id, ver.content)
 
     await manager.broadcast_to_room(
         doc_id,

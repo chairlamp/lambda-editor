@@ -6,7 +6,7 @@ This is Lambda. My team's project for AI1220: a remake of Overleaf with AI featu
 
 - **Role-aware collaboration** with `owner`, `editor`, and `viewer` permissions
 - **Invite links** with a per-project limit and pre-assigned access role
-- **Live collaborative editing** over WebSockets with presence and remote cursor indicators
+- **Y.js-powered collaborative editing** with a dedicated FastAPI sync backend, binary WebSocket transport, and conflict-free CRDT merges across all connected editors
 - **Real-time project file sync** so document create, rename, and delete events update every connected client immediately
 - **Monaco-powered LaTeX editor** with snippets, selection quoting, and insertion helpers
 - **Built-in AI assistant** with tool-enabled chat for web search, research, translation, rewriting, equation insertion, error explanation, and structured document edits
@@ -15,6 +15,7 @@ This is Lambda. My team's project for AI1220: a remake of Overleaf with AI featu
 - **Persistent AI consent acknowledgement** stored locally in the browser so users only need to accept the disclosure once
 - **Version history** with named snapshots and one-click restore
 - **PDF preview pipeline** that compiles LaTeX on demand and surfaces logs in the UI
+- **Multi-format export** for rendered LaTeX output, including `PDF`, `DVI`, and `PS`
 - **Shared PDF preview updates** so a fresh compile result is pushed to other clients viewing the same document
 
 <p align="center">
@@ -29,8 +30,8 @@ This is Lambda. My team's project for AI1220: a remake of Overleaf with AI featu
 | Backend | FastAPI, SQLAlchemy async, PostgreSQL, WebSockets |
 | AI | OpenAI Responses API for tool-enabled chat, OpenAI streaming for rewrite/generation actions, Google Cloud Translation API for translation tool calls |
 | Auth | Redis-backed server-side sessions with HTTP-only cookies |
-| Collaboration | Redis-backed websocket pub/sub, document sync, cursor presence, shared project events |
-| Output | PDF compilation via `pdflatex`, `xelatex`, `lualatex`, or `tectonic` |
+| Collaboration | Yjs CRDT (y-py on server, y-websocket + y-monaco on client), Redis pub/sub for presence and project events |
+| Output | Rendered export to `PDF`, `DVI`, and `PS` via `pdflatex`, `xelatex`, `lualatex`, or `tectonic` |
 | Default storage | PostgreSQL via `postgresql+asyncpg` |
 
 ## Setup
@@ -118,17 +119,52 @@ This script:
 
 ## Implementation Notes
 
+### How Y.js integrates with the backend
+
+Y.js document syncing is handled by the backend directly rather than by a separate collaboration service. FastAPI exposes a dedicated binary WebSocket endpoint at `/ws/{doc_id}/sync`, and authenticated clients connect to it through `y-websocket` from the frontend.
+
+For each open document, the backend creates or reuses an in-memory `Y.Doc` backed by `y-py`. On first connection, that `Y.Doc` is initialized from the document content stored in PostgreSQL. Incoming Y.js updates are applied on the server, rebroadcast to the other collaborators in the same room, and persisted back to PostgreSQL with a short debounce so the database is not written on every keystroke.
+
+The Y.js sync channel is separate from the existing JSON WebSocket channel at `/ws/{doc_id}`. The JSON socket still handles presence, cursor state, AI chat relay, and compile-result broadcasts, while the Y.js socket is responsible only for CRDT document content synchronization. Backend permission checks still apply at connection time, and `viewer` users are kept read-only by dropping sync updates server-side.
+
+Version restore also flows through this backend integration. When a restore request updates `doc.content` through the REST API, the backend calls `invalidate_room(...)` in the Y.js handler, replaces the current server-side `Y.Text`, and broadcasts the resulting delta so every connected editor updates immediately.
+
 <details>
 <summary><strong>Collaboration model</strong></summary>
 
-- Websocket fan-out uses Redis pub/sub so room broadcasts are not tied to a single process
-- Presence and cursor state are stored in Redis instead of in-process memory
-- The backend also maintains project-scoped websocket rooms for document lifecycle events
-- Users are admitted only if they belong to the parent project
-- Viewer members are explicitly marked read-only
-- Targeted `replace` operations help avoid clobbering unrelated edits during AI-assisted changes
-- File trees and project document lists subscribe to project events so create/delete/title changes stay synchronized across clients
-- Compile results are rebroadcast over the document room so connected collaborators see the latest rendered PDF and log state without manual refresh
+#### CRDT sync (`/ws/{doc_id}/sync`)
+
+Document text is a **Yjs CRDT** (`Y.Text`). Every edit is encoded as an immutable, causally-ordered operation that can be merged with any concurrent operation without conflicts, so two users typing at the same point simultaneously always produces a correct, deterministic result - no reconciliation dialog, no last-write-wins data loss.
+
+The implementation uses two WebSocket connections per open document:
+
+| Connection | Path | Protocol | Purpose |
+|---|---|---|---|
+| JSON channel | `/ws/{doc_id}` | JSON text frames | Presence, cursors, AI chat relay, compile results, title |
+| CRDT channel | `/ws/{doc_id}/sync` | Binary y-websocket protocol | Document text sync |
+
+**Server side (`yjs_handler.py`)** - written in Python using `y-py` (Python bindings to the Yrs Rust library):
+1. One `Y.YDoc` is kept in memory per open document, initialized from `doc.content` in PostgreSQL on first connection.
+2. On client connect the server sends `[SYNC, STEP1, state_vector]`; the client responds with the updates it has that the server is missing, and the server replies with what the client is missing (`STEP2`). After this exchange both sides are identical.
+3. Real-time edits arrive as `[SYNC, UPDATE, update_bytes]`, are applied with `Y.apply_update`, and rebroadcast to all other clients in the same room.
+4. Saves are debounced (2 s) to avoid hammering PostgreSQL on every keystroke; a final save runs when the last client leaves.
+5. `invalidate_room(doc_id, content)` replaces the in-memory Y.Doc text and broadcasts the delta — called by the version-restore REST endpoint so all open editors instantly receive the restored content.
+
+**Client side** - uses the pre-installed `y-websocket` and `y-monaco` npm packages:
+1. `WebsocketProvider` opens the binary CRDT channel and keeps it alive with automatic reconnection.
+2. The provider is created immediately but `syncedYdoc` is only set (and therefore `MonacoBinding` only created) after the first `sync` event fires, ensuring Monaco never binds to an empty `Y.Text` while the initial sync is in flight.
+3. `MonacoBinding` wires the `Y.Text` directly to the Monaco editor model - local keystrokes update `Y.Text` which propagates to peers; remote `Y.Text` updates are applied to the Monaco model as surgical `executeEdits` calls that preserve undo history and cursor position.
+4. A `Y.Text` observer updates the Zustand store after sync so the PDF preview and AI chat always read the current content.
+
+**AI-suggested edits** - when a user accepts a diff from the AI chat panel, `applyChange` and `handleAcceptAll` write directly into `Y.Text` via `ydoc.transact()`. Yjs broadcasts the change to all peers exactly like a manual keystroke.
+
+**Version restore** - the REST handler updates `doc.content` in PostgreSQL, then calls `yjs_handler.invalidate_room` which atomically replaces the server `Y.Text` (delete + insert in a single transaction) and broadcasts the resulting delta update to every connected client.
+
+**Presence and cursors** still travel over the JSON channel and are rendered as Monaco editor decorations, unchanged from before.
+
+- Project-scoped websocket rooms handle document lifecycle events (create, rename, delete) and are still backed by Redis pub/sub
+- Users are admitted only if they belong to the parent project; viewer members are marked read-only and their `SYNC_UPDATE` messages are dropped server-side
+- Compile results are rebroadcast over the JSON channel so collaborators see the latest PDF without manual refresh
 
 </details>
 
@@ -137,7 +173,9 @@ This script:
 
 - Source is written to a temporary directory as `document.tex`
 - The backend checks for `pdflatex`, `xelatex`, `lualatex`, or `tectonic`
-- Output is returned as `{ success, pdf_base64, log }`
+- The compile/export endpoint supports `pdf`, `dvi`, and `ps` output formats
+- PDF output is shown inline in the preview panel, while `DVI` and `PS` exports download directly
+- Output is returned as `{ success, pdf_base64, file_base64, file_name, mime_type, output_format, log }`
 - Missing compiler binaries are surfaced with install guidance in the response log
 
 </details>

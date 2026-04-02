@@ -1,8 +1,10 @@
 import type React from 'react'
+import type { Doc } from 'yjs'
 import type { DiffChange } from '../DiffView'
 
 export interface AIChatProps {
   socket: import('../../services/socket').RoomSocket | null
+  ydoc?: Doc | null
   onInsertText?: (text: string) => void
   onClose?: () => void
   readOnly?: boolean

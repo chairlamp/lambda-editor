@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import * as Y from 'yjs'
+import { WebsocketProvider } from 'y-websocket'
 import AIChat from '../components/AIChat'
 import AssetViewer from '../components/AssetViewer'
 import Editor from '../components/Editor'
@@ -8,7 +10,7 @@ import Preview from '../components/Preview'
 import Toolbar from '../components/Toolbar'
 import VersionHistoryPanel from '../components/VersionHistoryPanel'
 import { docsApi } from '../services/api'
-import { RoomSocket, TextOp } from '../services/socket'
+import { RoomSocket } from '../services/socket'
 import { Presence, useStore } from '../store/useStore'
 
 interface RemoteCursor {
@@ -19,24 +21,16 @@ interface RemoteCursor {
   selection?: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }
 }
 
-interface ReconcileState {
-  reason: string
-  serverContent: string
-  serverRevision: number
-  localContent: string
-}
-
 export default function EditorPage() {
   const { projectId, docId } = useParams<{ projectId: string; docId: string }>()
   const navigate = useNavigate()
   const {
     token, currentDoc, setCurrentDoc, setPresence, setConnected,
-    updateDocContent, updateDocSyncState, updateDocTitle, setCompiledPdf,
+    updateDocContent, updateDocTitle, setCompiledPdf,
     isConnected, user,
   } = useStore()
 
   const socketRef = useRef<RoomSocket | null>(null)
-  const opApplierRef = useRef<((ops: TextOp[]) => boolean) | null>(null)
   const textInserterRef = useRef<((text: string) => void) | null>(null)
   const currentDocRef = useRef(currentDoc)
 
@@ -52,7 +46,10 @@ export default function EditorPage() {
   const [pickingEquationLocation, setPickingEquationLocation] = useState(false)
   const [equationLocation, setEquationLocation] = useState<{ line: number; text: string; beforeText: string; afterText: string } | null>(null)
   const [reconnectingDelayMs, setReconnectingDelayMs] = useState<number | null>(null)
-  const [reconcileState, setReconcileState] = useState<ReconcileState | null>(null)
+
+  // syncedYdoc is null until the Yjs provider completes its first sync, preventing
+  // MonacoBinding from binding to an empty Y.Doc before content arrives.
+  const [syncedYdoc, setSyncedYdoc] = useState<Y.Doc | null>(null)
 
   useEffect(() => {
     currentDocRef.current = currentDoc
@@ -100,20 +97,7 @@ export default function EditorPage() {
     }
   })()
 
-  const handleLocalDocumentChange = useCallback((content: string) => {
-    if (currentDocRef.current?.kind === 'uploaded') return
-    const socket = socketRef.current
-    const baseRevision = currentDocRef.current?.content_revision ?? 0
-    if (socket?.isOpen()) {
-      socket.sendRevisionedUpdate(content, baseRevision)
-      return
-    }
-    socket?.setPendingDraft({
-      content,
-      baseRevision,
-      timestamp: Date.now(),
-    })
-  }, [])
+  // ── Load document via REST ─────────────────────────────────────────────────
 
   useEffect(() => {
     if (!projectId || !docId) return
@@ -129,6 +113,8 @@ export default function EditorPage() {
       })
       .catch(() => navigate(`/projects/${projectId}`))
   }, [projectId, docId, navigate, setCompiledPdf, setCurrentDoc])
+
+  // ── JSON WebSocket (presence, cursors, ai_chat, title, compile_result) ─────
 
   useEffect(() => {
     if (!docId || !token || !isEditableDoc) {
@@ -150,26 +136,8 @@ export default function EditorPage() {
       socket.on('disconnected', () => setConnected(false)),
       socket.on('reconnecting', (msg: any) => setReconnectingDelayMs(msg.delay_ms as number)),
       socket.on('init', (msg: any) => {
-        updateDocSyncState({ content: msg.content, content_revision: msg.revision })
         setPresence(msg.presence as Presence[])
         setReadOnly(!!msg.read_only)
-        const pendingDraft = socket.getPendingDraft()
-        if (pendingDraft && Date.now() - pendingDraft.timestamp <= 5 * 60 * 1000) {
-          if ((msg.revision as number) === pendingDraft.baseRevision) {
-            updateDocContent(pendingDraft.content)
-            socket.sendRevisionedUpdate(pendingDraft.content, msg.revision as number)
-          } else {
-            socket.clearPendingDraft()
-            setReconcileState({
-              reason: 'offline-conflict',
-              serverContent: msg.content as string,
-              serverRevision: msg.revision as number,
-              localContent: pendingDraft.content,
-            })
-          }
-        } else {
-          socket.clearPendingDraft()
-        }
         if (msg.cursors) {
           const restored = new Map<string, RemoteCursor>()
           for (const [uid, data] of Object.entries(msg.cursors as Record<string, any>)) {
@@ -182,31 +150,6 @@ export default function EditorPage() {
           }
           setRemoteDecorations(restored)
         }
-      }),
-      socket.on('ack', (msg: any) => {
-        socket.clearPendingDraft()
-        updateDocSyncState({ content: msg.content, content_revision: msg.revision })
-      }),
-      socket.on('update', (msg: any) => {
-        socket.clearPendingDraft()
-        updateDocSyncState({ content: msg.content, content_revision: msg.revision })
-      }),
-      socket.on('op', (msg: any) => {
-        const applied = opApplierRef.current?.(msg.ops as TextOp[]) ?? false
-        if (!applied) {
-          updateDocContent(msg.content as string)
-        }
-        updateDocSyncState({ content: msg.content as string, content_revision: msg.revision as number })
-      }),
-      socket.on('reconcile', (msg: any) => {
-        socket.clearPendingDraft()
-        updateDocSyncState({ content: msg.server_content as string, content_revision: msg.server_revision as number })
-        setReconcileState({
-          reason: msg.reason as string,
-          serverContent: msg.server_content as string,
-          serverRevision: msg.server_revision as number,
-          localContent: msg.local_content as string,
-        })
       }),
       socket.on('presence', (msg: any) => setPresence(msg.presence as Presence[])),
       socket.on('title', (msg: any) => updateDocTitle(msg.title)),
@@ -237,17 +180,55 @@ export default function EditorPage() {
       setConnected(false)
       socketRef.current = null
     }
-  }, [docId, token, isEditableDoc, currentDoc?.kind, setConnected, setPresence, updateDocContent, updateDocSyncState, updateDocTitle, setCompiledPdf])
+  }, [docId, token, isEditableDoc, currentDoc?.kind, setConnected, setPresence, updateDocTitle, setCompiledPdf])
+
+  // ── Yjs CRDT WebSocket ────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!isEditableDoc) {
-      setShowVersionHistory(false)
+    if (!docId || !isEditableDoc) {
+      setSyncedYdoc(null)
+      return
     }
+
+    const doc = new Y.Doc()
+    let destroyed = false
+    let observerFn: (() => void) | null = null
+
+    const provider = new WebsocketProvider(
+      `ws://${window.location.hostname}:8000`,
+      `ws/${docId}/sync`,
+      doc
+    )
+
+    const onSync = (synced: boolean) => {
+      if (!synced || destroyed) return
+      setSyncedYdoc(doc)
+      const ytext = doc.getText('content')
+      observerFn = () => {
+        if (!destroyed) updateDocContent(ytext.toString())
+      }
+      ytext.observe(observerFn)
+    }
+    provider.on('sync', onSync)
+
+    return () => {
+      destroyed = true
+      const ytext = doc.getText('content')
+      if (observerFn) ytext.unobserve(observerFn)
+      setSyncedYdoc(null)
+      provider.destroy()
+      doc.destroy()
+    }
+  }, [docId, isEditableDoc, updateDocContent])
+
+  // ── Misc cleanup on doc-type change ──────────────────────────────────────
+
+  useEffect(() => {
+    if (!isEditableDoc) setShowVersionHistory(false)
     if (!isLatexDoc) {
       setPickingEquationLocation(false)
       setEquationLocation(null)
       setQuoteForChat(null)
-      setReconcileState(null)
     }
   }, [isEditableDoc, isLatexDoc])
 
@@ -325,50 +306,9 @@ export default function EditorPage() {
           color: '#fecdd3', fontSize: 12,
         }}>
           <span>
-            Offline mode. Local edits stay in memory for up to 5 minutes and will replay when safe.
+            Offline mode. Changes will sync automatically when reconnected.
             {reconnectingDelayMs ? ` Reconnecting in ${Math.ceil(reconnectingDelayMs / 1000)}s.` : ''}
           </span>
-        </div>
-      )}
-
-      {isEditableDoc && reconcileState && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
-          background: '#3a2a12', borderBottom: '1px solid #7c5b14', color: '#fde68a', fontSize: 12,
-        }}>
-          <span style={{ flex: 1 }}>
-            Reconciliation required. The server document changed before your pending edits could be applied.
-          </span>
-          <button
-            onClick={() => {
-              updateDocSyncState({ content: reconcileState.localContent })
-              setReconcileState(null)
-            }}
-            style={{ background: '#f59e0b', color: '#111827', border: 'none', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
-          >
-            Review My Draft
-          </button>
-          <button
-            onClick={() => {
-              const socket = socketRef.current
-              if (!socket?.isOpen()) return
-              updateDocSyncState({ content: reconcileState.localContent })
-              socket.sendRevisionedUpdate(reconcileState.localContent, reconcileState.serverRevision)
-              setReconcileState(null)
-            }}
-            style={{ background: '#fef3c7', color: '#78350f', border: 'none', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
-          >
-            Overwrite With My Draft
-          </button>
-          <button
-            onClick={() => {
-              updateDocSyncState({ content: reconcileState.serverContent, content_revision: reconcileState.serverRevision })
-              setReconcileState(null)
-            }}
-            style={{ background: 'transparent', color: '#fde68a', border: '1px solid #7c5b14', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 12 }}
-          >
-            Keep Server Version
-          </button>
         </div>
       )}
 
@@ -380,14 +320,13 @@ export default function EditorPage() {
         <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
           {isEditableDoc ? (
             <Editor
+              ydoc={syncedYdoc}
               socket={socketRef.current}
               readOnly={readOnly}
               remoteDecorations={remoteDecorations}
-              onRegisterOpApplier={(fn) => { opApplierRef.current = fn }}
               onRegisterTextInserter={(fn) => { textInserterRef.current = fn }}
               onCursorMove={handleOwnCursorMove}
               onSelectionQuote={(q) => setQuoteForChat(q)}
-              onLocalDocumentChange={handleLocalDocumentChange}
               pickingLocation={pickingEquationLocation}
               onLocationPicked={(loc) => { setEquationLocation(loc); setPickingEquationLocation(false) }}
               ownUsername={user?.username}
@@ -424,6 +363,7 @@ export default function EditorPage() {
             <div style={{ width: aiWidth, flexShrink: 0, overflow: 'hidden' }}>
               <AIChat
                 socket={socketRef.current}
+                ydoc={syncedYdoc}
                 onInsertText={(text) => textInserterRef.current?.(text)}
                 onClose={() => {
                   setShowAI(false)

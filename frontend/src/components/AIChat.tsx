@@ -16,6 +16,7 @@ import MarkdownMessage from './ai-chat/MarkdownMessage'
 
 export default function AIChat({
   socket,
+  ydoc,
   onInsertText,
   onClose,
   readOnly,
@@ -491,15 +492,16 @@ export default function AIChat({
   // ── Diff accept/reject ───────────────────────────────────────────────────────
 
   const applyChange = useCallback((change: DiffChange) => {
-    if (!currentDoc?.content) return
-    const nextContent = currentDoc.content.replace(change.old_text, change.new_text)
-    updateDocContent(nextContent)
-    socketRef.current?.sendOp(
-      [{ kind: 'replace', old: change.old_text, new: change.new_text }],
-      currentDoc.content_revision ?? 0,
-      nextContent,
-    )
-  }, [currentDoc, updateDocContent])
+    if (!ydoc) return
+    const ytext = ydoc.getText('content')
+    const content = ytext.toString()
+    const idx = content.indexOf(change.old_text)
+    if (idx === -1) return
+    ydoc.transact(() => {
+      ytext.delete(idx, change.old_text.length)
+      ytext.insert(idx, change.new_text)
+    })
+  }, [ydoc])
 
   const persistReviewState = useCallback((messageId: string, nextAccepted: Set<string>, nextRejected: Set<string>) => {
     if (!canReviewDiffs || !currentDoc?.id || !currentDoc.project_id) return
@@ -556,23 +558,23 @@ export default function AIChat({
   }, [accepted, canReviewDiffs, persistReviewState])
 
   const handleAcceptAll = useCallback((id: string, changes: DiffChange[]) => {
-    if (!canReviewDiffs || !currentDoc?.content) return
-    let nextContent = currentDoc.content
-    changes.forEach((change) => {
-      nextContent = nextContent.replace(change.old_text, change.new_text)
+    if (!canReviewDiffs || !ydoc) return
+    const ytext = ydoc.getText('content')
+    ydoc.transact(() => {
+      for (const change of changes) {
+        const content = ytext.toString()
+        const idx = content.indexOf(change.old_text)
+        if (idx === -1) continue
+        ytext.delete(idx, change.old_text.length)
+        ytext.insert(idx, change.new_text)
+      }
     })
-    updateDocContent(nextContent)
-    socketRef.current?.sendOp(
-      changes.map((change) => ({ kind: 'replace' as const, old: change.old_text, new: change.new_text })),
-      currentDoc.content_revision ?? 0,
-      nextContent,
-    )
     const nextAccepted = new Set(changes.map((c) => c.id))
     const nextRejected = new Set<string>()
     setAccepted((prev) => { const m = new Map(prev); m.set(id, nextAccepted); return m })
     setRejected((prev) => { const m = new Map(prev); m.delete(id); return m })
     persistReviewState(id, nextAccepted, nextRejected)
-  }, [canReviewDiffs, currentDoc, persistReviewState, updateDocContent])
+  }, [canReviewDiffs, ydoc, persistReviewState])
 
   const handleRejectAll = useCallback((id: string, changes: DiffChange[]) => {
     if (!canReviewDiffs) return

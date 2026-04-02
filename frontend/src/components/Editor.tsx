@@ -1,8 +1,10 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import MonacoEditor, { OnMount } from '@monaco-editor/react'
 import type * as Monaco from 'monaco-editor'
+import * as Y from 'yjs'
+import { MonacoBinding } from 'y-monaco'
 import { useStore } from '../store/useStore'
-import { RoomSocket, TextOp } from '../services/socket'
+import { RoomSocket } from '../services/socket'
 import { FileText, Quote, MapPin } from 'lucide-react'
 
 interface RemoteCursor {
@@ -15,14 +17,13 @@ interface RemoteCursor {
 
 interface Props {
   socket: RoomSocket | null
+  ydoc?: Y.Doc | null
   readOnly?: boolean
   remoteDecorations: Map<string, RemoteCursor>
-  onRegisterOpApplier: (fn: (ops: TextOp[]) => boolean) => void
   onRegisterTextInserter?: (fn: (text: string) => void) => void
   onRegisterGetCursorPos?: (fn: () => { lineNumber: number; column: number } | null) => void
   onCursorMove?: (pos: { lineNumber: number; column: number }) => void
   onSelectionQuote?: (quote: { lineStart: number; lineEnd: number; text: string }) => void
-  onLocalDocumentChange?: (content: string) => void
   pickingLocation?: boolean
   onLocationPicked?: (loc: { line: number; text: string; beforeText: string; afterText: string }) => void
   ownUsername?: string
@@ -48,56 +49,27 @@ const LATEX_SNIPPETS = [
   { label: '\\int', insertText: '\\int_{$1}^{$2}' },
 ]
 
-export default function Editor({ socket, readOnly, remoteDecorations, onRegisterOpApplier, onRegisterTextInserter, onRegisterGetCursorPos, onCursorMove, onSelectionQuote, onLocalDocumentChange, pickingLocation, onLocationPicked, ownUsername, ownColor, language = 'plaintext' }: Props) {
+export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRegisterTextInserter, onRegisterGetCursorPos, onCursorMove, onSelectionQuote, pickingLocation, onLocationPicked, ownUsername, ownColor, language = 'plaintext' }: Props) {
   const { currentDoc, updateDocContent } = useStore()
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof Monaco | null>(null)
   const isRemoteUpdate = useRef(false)
   const decorationIds = useRef<string[]>([])
+  const bindingRef = useRef<MonacoBinding | null>(null)
   const socketRef = useRef<RoomSocket | null>(null)
   useEffect(() => { socketRef.current = socket }, [socket])
-  // Refs so mount-time closures see latest values without re-registering handlers
   const pickingLocationRef = useRef(false)
   const onLocationPickedRef = useRef(onLocationPicked)
   useEffect(() => { pickingLocationRef.current = pickingLocation ?? false }, [pickingLocation])
   useEffect(() => { onLocationPickedRef.current = onLocationPicked }, [onLocationPicked])
 
   const [selPopup, setSelPopup] = useState<SelectionPopup | null>(null)
-
-  const applyOps = useCallback((ops: TextOp[]) => {
-    const editor = editorRef.current
-    const monaco = monacoRef.current
-    if (!editor || !monaco) return false
-    const model = editor.getModel()
-    if (!model) return false
-
-    isRemoteUpdate.current = true
-    let appliedAll = true
-    for (const op of ops) {
-      if (op.kind !== 'replace') continue
-      const content = model.getValue()
-      const idx = content.indexOf(op.old)
-      if (idx === -1) {
-        appliedAll = false
-        continue
-      }
-      const startPos = model.getPositionAt(idx)
-      const endPos = model.getPositionAt(idx + op.old.length)
-      editor.executeEdits('remote-op', [{
-        range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
-        text: op.new,
-      }])
-    }
-    isRemoteUpdate.current = false
-    updateDocContent(model.getValue())
-    return appliedAll
-  }, [updateDocContent])
+  const [editorReady, setEditorReady] = useState(false)
 
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor
     monacoRef.current = monaco
-
-    onRegisterOpApplier(applyOps)
+    setEditorReady(true)
 
     let lastCursorPos: { lineNumber: number; column: number } | null = null
 
@@ -226,7 +198,26 @@ export default function Editor({ socket, readOnly, remoteDecorations, onRegister
     _injectCursorStyles()
   }
 
+  // Create/destroy MonacoBinding when the Yjs doc is ready and editor has mounted
   useEffect(() => {
+    bindingRef.current?.destroy()
+    bindingRef.current = null
+    if (!editorReady || !ydoc) return
+    const editor = editorRef.current
+    if (!editor) return
+    const model = editor.getModel()
+    if (!model) return
+    const ytext = ydoc.getText('content')
+    bindingRef.current = new MonacoBinding(ytext, model, new Set([editor]))
+    return () => {
+      bindingRef.current?.destroy()
+      bindingRef.current = null
+    }
+  }, [editorReady, ydoc])
+
+  // Sync store content → editor when not using MonacoBinding
+  useEffect(() => {
+    if (ydoc) return  // MonacoBinding handles content
     const editor = editorRef.current
     const monaco = monacoRef.current
     if (!editor || !monaco) return
@@ -241,7 +232,7 @@ export default function Editor({ socket, readOnly, remoteDecorations, onRegister
       text: docContent,
     }])
     isRemoteUpdate.current = false
-  }, [currentDoc?.content])
+  }, [currentDoc?.content, ydoc])
 
   useEffect(() => {
     const editor = editorRef.current
@@ -285,12 +276,11 @@ export default function Editor({ socket, readOnly, remoteDecorations, onRegister
 
   const handleChange = useCallback(
     (value: string | undefined) => {
+      if (ydoc) return  // Y.Text observer in EditorPage updates the store
       if (isRemoteUpdate.current) return
-      const content = value ?? ''
-      updateDocContent(content)
-      onLocalDocumentChange?.(content)
+      updateDocContent(value ?? '')
     },
-    [onLocalDocumentChange, updateDocContent]
+    [ydoc, updateDocContent]
   )
 
   const handleQuote = () => {

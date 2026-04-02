@@ -1,15 +1,3 @@
-export interface TextOp {
-  kind: 'replace'
-  old: string
-  new: string
-}
-
-interface PendingDraft {
-  content: string
-  baseRevision: number
-  timestamp: number
-}
-
 type MessageHandler = (msg: Record<string, unknown>) => void
 
 export class RoomSocket {
@@ -19,7 +7,6 @@ export class RoomSocket {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private destroyed = false
   private reconnectDelayMs = 1000
-  private pendingDraft: PendingDraft | null = null
 
   constructor(
     private roomId: string,
@@ -86,26 +73,12 @@ export class RoomSocket {
     }
   }
 
-  sendUpdate(content: string) {
-    this.send({ type: 'update', content })
-  }
-
-  sendRevisionedUpdate(content: string, baseRevision: number) {
-    this.send({ type: 'update', content, base_revision: baseRevision })
-  }
-
   sendCursor(position: { lineNumber: number; column: number }, selection?: unknown) {
     this.send({ type: 'cursor', position, selection })
   }
 
   sendTitle(title: string) {
     this.send({ type: 'title', title })
-  }
-
-  // Broadcast targeted text replacements instead of the whole document so
-  // concurrent edits in other parts of the document survive unaffected.
-  sendOp(ops: TextOp[], baseRevision: number, localContent: string) {
-    this.send({ type: 'op', ops, base_revision: baseRevision, local_content: localContent })
   }
 
   sendAiChat(data: Record<string, unknown>) {
@@ -129,18 +102,6 @@ export class RoomSocket {
 
   isOpen() {
     return this.ws?.readyState === WebSocket.OPEN
-  }
-
-  setPendingDraft(draft: PendingDraft | null) {
-    this.pendingDraft = draft
-  }
-
-  getPendingDraft() {
-    return this.pendingDraft
-  }
-
-  clearPendingDraft() {
-    this.pendingDraft = null
   }
 }
 

@@ -9,6 +9,7 @@ from app.api import auth, documents, ai, compile
 from app.api import projects, versions
 from app.websocket.rooms import handle_room
 from app.websocket.projects import handle_project_room
+from app.websocket.yjs_handler import handle_yjs_room
 from app.models.user import User
 from app.redis_client import redis_client
 import app.models  # noqa: F401
@@ -51,6 +52,18 @@ async def _authenticate_ws(websocket: WebSocket):
     session_id = websocket.cookies.get(settings.SESSION_COOKIE_NAME)
     user_id = await auth.get_session_user_id(session_id)
     return {"user_id": user_id} if user_id else None
+
+
+@app.websocket("/ws/{doc_id}/sync")
+async def yjs_websocket_endpoint(
+    websocket: WebSocket,
+    doc_id: str,
+):
+    auth_data = await _authenticate_ws(websocket)
+    if not auth_data:
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+    await handle_yjs_room(websocket, doc_id, auth_data["user_id"])
 
 
 @app.websocket("/ws/{doc_id}")

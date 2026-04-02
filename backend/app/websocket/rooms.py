@@ -54,15 +54,6 @@ async def handle_room(
         exclude=user_id,
     )
 
-    def _reconcile_payload(reason: str, local_content: str):
-        return {
-            "type": "reconcile",
-            "reason": reason,
-            "server_content": doc.content,
-            "server_revision": doc.content_revision,
-            "local_content": local_content,
-        }
-
     try:
         while True:
             raw = await websocket.receive_text()
@@ -73,75 +64,7 @@ async def handle_room(
 
             msg_type = msg.get("type")
 
-            if msg_type == "update":
-                if read_only:
-                    continue
-                content = msg.get("content", "")
-                base_revision = int(msg.get("base_revision", -1))
-                if base_revision != doc.content_revision:
-                    await room.send_to(user_id, _reconcile_payload("revision_conflict", content))
-                    continue
-                doc.content = content
-                doc.content_revision += 1
-                await db.commit()
-                await room.send_to(user_id, {
-                    "type": "ack",
-                    "content": doc.content,
-                    "revision": doc.content_revision,
-                })
-                await room.broadcast(
-                    {
-                        "type": "update",
-                        "content": content,
-                        "revision": doc.content_revision,
-                        "user_id": user_id,
-                    },
-                    exclude=user_id,
-                )
-
-            elif msg_type == "op":
-                # Targeted text replacements — safer than full-doc broadcast when
-                # multiple clients edit concurrently (AI changes, parallel typing).
-                if read_only:
-                    continue
-                base_revision = int(msg.get("base_revision", -1))
-                if base_revision != doc.content_revision:
-                    await room.send_to(user_id, _reconcile_payload("revision_conflict", msg.get("local_content", doc.content)))
-                    continue
-                ops = msg.get("ops", [])
-                next_content = doc.content
-                failed = False
-                for op in ops:
-                    if op.get("kind") == "replace":
-                        old_text = op.get("old", "")
-                        new_text = op.get("new", "")
-                        if old_text not in next_content:
-                            failed = True
-                            break
-                        next_content = next_content.replace(old_text, new_text, 1)
-                if failed:
-                    await room.send_to(user_id, _reconcile_payload("apply_failed", msg.get("local_content", next_content)))
-                    continue
-                doc.content = next_content
-                doc.content_revision += 1
-                await db.commit()
-                await room.send_to(user_id, {
-                    "type": "ack",
-                    "content": doc.content,
-                    "revision": doc.content_revision,
-                })
-                await room.broadcast(
-                    {
-                        "type": "op",
-                        "ops": ops,
-                        "content": doc.content,
-                        "revision": doc.content_revision,
-                        "user_id": user_id,
-                    },
-                    exclude=user_id,
-                )
-
-            elif msg_type == "cursor":
+            if msg_type == "cursor":
                 await room.set_cursor(user_id, msg.get("position"))
                 await room.broadcast(
                     {
