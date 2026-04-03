@@ -1,10 +1,52 @@
 """
-Yjs CRDT sync — binary y-websocket protocol served directly by FastAPI.
-
 Clients use `WebsocketProvider` from the `y-websocket` npm package to connect
 to /ws/{doc_id}/sync. Server keeps a per-process working Doc for connected
 clients, while Redis stores the active CRDT state and fans out updates across
 backend instances. PostgreSQL remains the durable snapshot/version store.
+
+Why the adapter is shaped this way:
+
+    1. connect / recover
+       browser
+         |
+         | websocket -> STEP1(state vector)
+         v
+       FastAPI room Doc ---------------------> Redis full CRDT state
+         |                                         ^
+         | STEP2(missing diff)                     |
+         '-----------------------------------------'
+
+       The room answers with only the missing diff so reconnects stay cheap.
+       Redis holds the latest merged CRDT state so any backend instance can
+       rebuild the room even after another instance handled the last edits.
+
+    2. edit on this instance
+       browser edit
+         |
+         v
+       room Doc apply_update()
+         |
+         +--> local websocket broadcast         why: nearby collaborators should
+         |                                         see changes immediately
+         |
+         +--> Redis state merge                why: the next reconnect needs the
+         |                                         latest CRDT state, not a stale snapshot
+         |
+         +--> Redis pub/sub                    why: sibling backend instances must
+         |                                         replay the same update into their rooms
+         |
+         '-> delayed PostgreSQL save           why: versions and cold starts need
+                                                   durable text, but not on every keystroke
+
+    3. edit on another instance
+       sibling instance -> Redis pub/sub -> this room Doc -> local websocket broadcast
+
+       Pub/sub is the cross-instance bridge, so each process can keep an in-memory
+       room for speed without diverging from the others.
+
+The room Doc is the fast coordination layer. Redis keeps instances converged and
+reconnectable. PostgreSQL keeps the durable document history the CRDT layer alone
+does not provide.
 """
 from __future__ import annotations
 
@@ -24,10 +66,6 @@ from app.database import AsyncSessionLocal
 from app.models.document import Document
 from app.models.project import ProjectMember
 from app.redis_client import redis_client
-
-
-# ── lib0 variable-length uint helpers ────────────────────────────────────────
-
 
 def _enc_vu(n: int) -> bytes:
     buf = []
@@ -52,9 +90,6 @@ def _dec_vu(data: bytes, pos: int) -> tuple[int, int]:
 def _read_blob(data: bytes, pos: int) -> tuple[bytes, int]:
     n, pos = _dec_vu(data, pos)
     return data[pos: pos + n], pos + n
-
-
-# ── y-websocket message type constants ───────────────────────────────────────
 
 _SYNC = 0
 _AWARENESS = 1
@@ -84,10 +119,6 @@ def _msg_step2(diff: bytes) -> bytes:
 
 def _msg_update(upd: bytes) -> bytes:
     return bytes([_SYNC, _UPDATE]) + _enc_vu(len(upd)) + upd
-
-
-# ── Room ─────────────────────────────────────────────────────────────────────
-
 
 class _Room:
     def __init__(self, doc_id: str, initial_content: str) -> None:
@@ -286,8 +317,6 @@ class _Room:
             pass
 
 
-# ── Room registry ─────────────────────────────────────────────────────────────
-
 _rooms: Dict[str, _Room] = {}
 _registry_lock = asyncio.Lock()
 
@@ -347,10 +376,6 @@ async def _release(doc_id: str) -> None:
             await room.close()
             del _rooms[doc_id]
 
-
-# ── WebSocket handler ─────────────────────────────────────────────────────────
-
-
 async def handle_yjs_room(websocket: WebSocket, doc_id: str, user_id: str) -> None:
     await websocket.accept()
 
@@ -378,7 +403,7 @@ async def handle_yjs_room(websocket: WebSocket, doc_id: str, user_id: str) -> No
     room = await _get_room(doc_id, initial_content)
     await room.add(user_id, websocket)
 
-    # Kick off sync: send our state vector so the client can send us what we're missing
+    # Start with the state vector so the client only sends the delta we do not already have.
     sv = room._state_vector()
     await websocket.send_bytes(_msg_step1(sv))
 
@@ -402,7 +427,7 @@ async def handle_yjs_room(websocket: WebSocket, doc_id: str, user_id: str) -> No
                     continue
 
                 if sync_type == _STEP1:
-                    # Client sent its state vector; reply with everything it's missing
+                    # Reply with only the missing update so reconnects do not resend full documents.
                     try:
                         diff = room.ydoc.get_update(payload)
                         await websocket.send_bytes(_msg_step2(diff))
@@ -416,7 +441,7 @@ async def handle_yjs_room(websocket: WebSocket, doc_id: str, user_id: str) -> No
                             continue
 
             elif msg_type == _AWARENESS:
-                # Forward awareness (remote cursors) unchanged to all other clients
+                # Forward awareness untouched so cursor presence stays compatible with y-websocket clients.
                 await room._broadcast(data, exclude=user_id)
 
     except Exception:

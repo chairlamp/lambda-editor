@@ -178,7 +178,7 @@ async def create_project(
 
     db.add(ProjectMember(project_id=project.id, user_id=current_user.id, role="owner"))
 
-    # Every project starts with a main.tex so users land directly in the editor
+    # Seed each project with a main document so creation can jump straight into editing.
     main_doc = Document(
         id=str(uuid.uuid4()),
         title="main.tex",

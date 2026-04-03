@@ -13,7 +13,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-// Handles /join/:token — joins the project and redirects to its page
+// Resolve invite links immediately so shared URLs can drop users into the project flow.
 function JoinPage() {
   const { token: inviteToken } = useParams<{ token: string }>()
   const { token: authToken } = useStore()

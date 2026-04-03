@@ -47,7 +47,6 @@ export default function DiffView({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {/* Explanation */}
       <div style={{
         background: '#1e2a4a', borderRadius: 8, padding: '10px 14px',
         fontSize: 13, color: '#c7d2fe', lineHeight: 1.5,
@@ -55,7 +54,6 @@ export default function DiffView({
         {explanation}
       </div>
 
-      {/* Bulk actions */}
       {((pending.length > 0 && canReview) || onAskDifferent) && (
         <div style={{ display: 'flex', gap: 6 }}>
           {pending.length > 0 && canReview && (
@@ -76,7 +74,6 @@ export default function DiffView({
         </div>
       )}
 
-      {/* Individual hunks */}
       {changes.map((change) => {
         const isAccepted = accepted.has(change.id)
         const isRejected = rejected.has(change.id)
@@ -92,7 +89,6 @@ export default function DiffView({
               opacity: isRejected ? 0.5 : 1,
             }}
           >
-            {/* Hunk header */}
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '8px 12px',
@@ -126,10 +122,8 @@ export default function DiffView({
               </div>
             )}
 
-            {/* Diff lines */}
             {isOpen && (
               <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                {/* Removed lines */}
                 {change.old_text && change.old_text.split('\n').map((line, i) => (
                   <div
                     key={`old-${i}`}
@@ -143,7 +137,6 @@ export default function DiffView({
                     {line || ' '}
                   </div>
                 ))}
-                {/* Added lines */}
                 {change.new_text && change.new_text.split('\n').map((line, i) => (
                   <div
                     key={`new-${i}`}

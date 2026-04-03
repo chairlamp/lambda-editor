@@ -45,7 +45,7 @@ export default function AIChat({
   const [rejected, setRejected] = useState<Map<string, Set<string>>>(new Map())
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  // Maps action_id -> assistant message id for robust streaming tracking
+  // Track server action IDs separately so streamed updates can resume the right message.
   const streamingMsgRef = useRef(new Map<string, string>())
   const actionRequestRef = useRef(new Map<string, ActionRequest>())
   const { currentDoc, updateDocContent, user } = useStore()
@@ -53,7 +53,7 @@ export default function AIChat({
   const canReviewDiffs = !readOnly
   const canInvokeAI = !readOnly
 
-  // Keep a stable ref to socket so callbacks don't go stale
+  // Read the latest socket inside callbacks without forcing every handler to resubscribe.
   const socketRef = useRef<RoomSocket | null>(null)
   useEffect(() => { socketRef.current = socket }, [socket])
 
@@ -61,14 +61,14 @@ export default function AIChat({
     socketRef.current?.sendAiChat(data)
   }, [])
 
-  // Absorb pending quotes from editor selection
+  // Pull editor quotes into chat state so the editor can clear its transient selection UI.
   useEffect(() => {
     if (!pendingQuote) return
     setQuotes((prev) => [...prev, { ...pendingQuote, filename: currentDocTitle || 'document' }])
     onQuoteConsumed?.()
   }, [pendingQuote])
 
-  // Absorb equation location picked in editor
+  // Mirror picked locations locally so action retries do not depend on editor state surviving.
   useEffect(() => {
     if (!pendingEquationLocation) return
     setEquationLocation(pendingEquationLocation)
@@ -116,7 +116,7 @@ export default function AIChat({
     return () => { cancelled = true }
   }, [currentDoc?.id, currentDoc?.project_id])
 
-  // Receive AI chat events broadcast by other users
+  // Rebuild remote chat activity locally so every collaborator sees the same AI timeline.
   useEffect(() => {
     if (!socket) return
     const off = socket.on('ai_chat', (msg: any) => {
@@ -143,12 +143,10 @@ export default function AIChat({
         const chunk = msg.content as string
         const existingMsgId = streamingMsgRef.current.get(actionId)
         if (existingMsgId) {
-          // Append to existing streaming message found by ID
           setMessages((prev) => prev.map((m) =>
             m.id === existingMsgId ? { ...m, content: m.content + chunk } : m
           ))
         } else {
-          // First chunk — create the assistant message and track its ID
           const msgId = `${actionId}-res`
           streamingMsgRef.current.set(actionId, msgId)
           setMessages((prev) => [...prev, {
@@ -185,8 +183,6 @@ export default function AIChat({
     })
     return () => off()
   }, [socket])
-
-  // ── Local helpers (no broadcast) ────────────────────────────────────────────
 
   const addUserMsg = (msg: Omit<ChatMessage, 'id'>, id: string) => {
     setMessages((prev) => [...prev, { ...msg, id }])
@@ -257,8 +253,7 @@ export default function AIChat({
     )
   }
 
-  // ── Stream helper ────────────────────────────────────────────────────────────
-
+  // Share chunks as they arrive so collaborators do not wait for the final response.
   const runStream = async (
     endpoint: string,
     payload: Record<string, unknown>,
@@ -294,8 +289,6 @@ export default function AIChat({
       },
     )
   }
-
-  // ── Action handlers ──────────────────────────────────────────────────────────
 
   const sendMessage = async () => {
     if (loading || !canInvokeAI || !aiDisclosureAccepted) return
@@ -489,8 +482,7 @@ export default function AIChat({
     textareaRef.current?.focus()
   }
 
-  // ── Diff accept/reject ───────────────────────────────────────────────────────
-
+  // Apply accepted diffs through Yjs so reviews become collaborative edits instead of local patches.
   const applyChange = useCallback((change: DiffChange) => {
     if (!ydoc) return
     const ytext = ydoc.getText('content')
@@ -585,8 +577,6 @@ export default function AIChat({
     persistReviewState(id, nextAccepted, nextRejected)
   }, [canReviewDiffs, persistReviewState])
 
-  // ── Render ───────────────────────────────────────────────────────────────────
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#12122a', fontFamily: 'system-ui, sans-serif' }}>
 
@@ -602,7 +592,6 @@ export default function AIChat({
         </div>
       </div>
 
-      {/* Action chips */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '7px 10px', borderBottom: '1px solid #1e1e3a', flexShrink: 0 }}>
         {AVAILABLE_ACTIONS.map((type) => {
           const def = ACTION_DEFS[type]
@@ -627,7 +616,6 @@ export default function AIChat({
         })}
       </div>
 
-      {/* Messages */}
       <div style={{ flex: 1, overflow: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {!aiDisclosureAccepted && canInvokeAI && (
           <div style={{
@@ -773,7 +761,6 @@ export default function AIChat({
         <div ref={bottomRef} />
       </div>
 
-      {/* Input area */}
       <div style={{ padding: '8px 10px', borderTop: '1px solid #1e1e3a', flexShrink: 0 }}>
         {quotes.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>

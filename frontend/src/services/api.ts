@@ -2,6 +2,7 @@ import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api', withCredentials: true })
 
+// Handle expired sessions in one place so feature code can treat 401s uniformly.
 api.interceptors.response.use(
   (r) => r,
   (err) => {
@@ -16,7 +17,6 @@ api.interceptors.response.use(
 
 export default api
 
-// ── Auth (REST: POST /users, POST /tokens, GET /users/me) ─────────────────────
 export const authApi = {
   register: (email: string, username: string, password: string) =>
     api.post('/users', { email, username, password }),
@@ -26,7 +26,6 @@ export const authApi = {
   me: () => api.get('/users/me'),
 }
 
-// ── Projects ──────────────────────────────────────────────────────────────────
 export const projectsApi = {
   list: () => api.get('/projects'),
   create: (title: string, description = '') => api.post('/projects', { title, description }),
@@ -47,7 +46,6 @@ export const projectsApi = {
     api.delete(`/projects/${projectId}/invites/${inviteId}`),
 }
 
-// ── Documents (project-scoped) ────────────────────────────────────────────────
 export const docsApi = {
   list: (projectId: string) => api.get(`/projects/${projectId}/documents`),
   listFolders: (projectId: string) => api.get(`/projects/${projectId}/documents/folders`),
@@ -73,7 +71,6 @@ export const docsApi = {
     `/api/projects/${projectId}/documents/${docId}/download`,
 }
 
-// ── Versions ──────────────────────────────────────────────────────────────────
 export const versionsApi = {
   list: (projectId: string, docId: string) =>
     api.get(`/projects/${projectId}/documents/${docId}/versions`),
@@ -85,7 +82,6 @@ export const versionsApi = {
     api.post(`/projects/${projectId}/documents/${docId}/versions/${versionId}/restore`),
 }
 
-// ── Compile ───────────────────────────────────────────────────────────────────
 export const compileApi = {
   compile: (content: string, projectId?: string, docId?: string, outputFormat = 'pdf') => api.post('/compile', {
     content,
@@ -108,7 +104,7 @@ export const aiChatApi = {
     api.patch(`/ai/history/${projectId}/${docId}/${messageId}/review`, { accepted, rejected }),
 }
 
-// ── AI streaming helper ────────────────────────────────────────────────────────
+// Parse streamed `data:` frames so chat UIs can render long responses incrementally.
 export async function streamAI(
   endpoint: string,
   body: Record<string, unknown>,

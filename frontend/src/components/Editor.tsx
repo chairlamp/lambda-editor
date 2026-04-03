@@ -99,12 +99,11 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
       _ensureCursorStyle(ownClass, ownColor, `${ownUsername} (you)`)
     }
 
-    // Selection change → broadcast cursor+selection, show quote popup
+    // Reuse one selection listener so cursor presence and quote actions stay in sync.
     editor.onDidChangeCursorSelection(() => {
       const pos = editor.getPosition()
       const sel = editor.getSelection()
 
-      // Always broadcast current position + selection state
       if (pos) {
         const selRange = sel && !sel.isEmpty() ? {
           startLineNumber: sel.startLineNumber,
@@ -118,7 +117,6 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
         )
       }
 
-      // Quote popup
       if (!sel || sel.isEmpty()) {
         setSelPopup(null)
         return
@@ -144,7 +142,7 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
       })
     })
 
-    // Location picking — next mousedown in editor captures the clicked line
+    // Capture the next click directly from Monaco so equation insertion stays line-accurate.
     editor.onMouseDown((e) => {
       if (!pickingLocationRef.current) return
       const pos = e.target.position
@@ -198,7 +196,7 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
     _injectCursorStyles()
   }
 
-  // Create/destroy MonacoBinding when the Yjs doc is ready and editor has mounted
+  // Recreate the binding when the backing doc changes so Monaco never points at stale CRDT state.
   useEffect(() => {
     bindingRef.current?.destroy()
     bindingRef.current = null
@@ -215,9 +213,9 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
     }
   }, [editorReady, ydoc])
 
-  // Sync store content → editor when not using MonacoBinding
+  // Keep non-Yjs documents editable through the same component instead of splitting editors.
   useEffect(() => {
-    if (ydoc) return  // MonacoBinding handles content
+    if (ydoc) return
     const editor = editorRef.current
     const monaco = monacoRef.current
     if (!editor || !monaco) return
@@ -245,7 +243,6 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
       const cursorClass = `rc-${safeId}`
       _ensureCursorStyle(cursorClass, color, username)
 
-      // Cursor decoration (single point)
       newDecorations.push({
         range: new monaco.Range(lineNumber, column, lineNumber, column),
         options: {
@@ -255,9 +252,9 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
         },
       })
 
-      // Selection range decoration — inlineClassName applies per character (not per line)
       if (selection) {
-        const selClass = `rs-${safeId}`  // rs- prefix avoids the rc- global border rule
+        // Keep selection styling isolated from cursor styling so one rule cannot override the other.
+        const selClass = `rs-${safeId}`
         _ensureSelectionStyle(selClass, color)
         newDecorations.push({
           range: new monaco.Range(
@@ -276,7 +273,7 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
 
   const handleChange = useCallback(
     (value: string | undefined) => {
-      if (ydoc) return  // Y.Text observer in EditorPage updates the store
+      if (ydoc) return
       if (isRemoteUpdate.current) return
       updateDocContent(value ?? '')
     },
@@ -315,7 +312,6 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
         }}
       />
 
-      {/* Location-picking banner */}
       {pickingLocation && (
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20,
@@ -330,7 +326,6 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
         </div>
       )}
 
-      {/* Quote popup — appears on text selection */}
       {selPopup && (
         <div
           style={{
@@ -348,7 +343,7 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
             boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
             pointerEvents: 'all',
           }}
-          // Prevent mousedown from clearing the selection
+          // Preserve the selected range so quoting still has access to the original text.
           onMouseDown={(e) => e.preventDefault()}
         >
           <FileText size={11} color="#818cf8" />
@@ -387,7 +382,7 @@ const _injectedClasses = new Set<string>()
 const _injectedSelClasses = new Set<string>()
 
 function _ensureSelectionStyle(className: string, color: string) {
-  // Always (re-)inject so the color stays accurate if called again
+  // Replace prior rules so reconnects cannot leave stale collaborator colors behind.
   const existing = document.getElementById(`style-${className}`)
   if (existing) existing.remove()
   _injectedSelClasses.add(className)

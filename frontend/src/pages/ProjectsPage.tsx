@@ -39,7 +39,7 @@ export default function ProjectsPage() {
 
   const joinProject = async () => {
     if (!inviteInput.trim()) return
-    // Accept either full URL or raw token
+    // Accept pasted links as well as bare tokens so sharing works across chat and email.
     const token = inviteInput.trim().split('/').pop() || ''
     try {
       const r = await projectsApi.join(token)
@@ -52,7 +52,6 @@ export default function ProjectsPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#0f0f23', color: '#e2e8f0' }}>
-      {/* Nav */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '14px 28px', background: '#16213e', borderBottom: '1px solid #1e1e3a',
@@ -70,7 +69,6 @@ export default function ProjectsPage() {
       </div>
 
       <div style={{ maxWidth: 860, margin: '0 auto', padding: '32px 24px' }}>
-        {/* Header row */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: '#c7d2fe' }}>My Projects</h1>
           <button onClick={() => setCreating(true)} style={primaryBtn}>
@@ -78,7 +76,6 @@ export default function ProjectsPage() {
           </button>
         </div>
 
-        {/* Create form */}
         {creating && (
           <div style={card}>
             <h3 style={{ color: '#a5b4fc', marginBottom: 12, fontSize: 14 }}>New Project</h3>
@@ -104,7 +101,6 @@ export default function ProjectsPage() {
           </div>
         )}
 
-        {/* Join via invite */}
         <div style={{ ...card, display: 'flex', gap: 8, alignItems: 'center', marginBottom: 20 }}>
           <Users size={14} color="#6b7280" />
           <input
@@ -121,7 +117,6 @@ export default function ProjectsPage() {
           <div style={{ color: '#fca5a5', fontSize: 13, marginBottom: 12 }}>{error}</div>
         )}
 
-        {/* Project list */}
         {loading ? (
           <div style={{ color: '#4a4a6a', textAlign: 'center', marginTop: 60 }}>Loading…</div>
         ) : projects.length === 0 ? (

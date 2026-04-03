@@ -47,7 +47,7 @@ export default function ProjectPage() {
       .then((r) => {
         const project: Project = r.data
         setCurrentProject(project)
-        // Auto-redirect to main.tex if there's a known first document
+        // Prefer the main document immediately so project links land in an editable file.
         if (project.main_doc_id) {
           navigate(`/projects/${projectId}/docs/${project.main_doc_id}`, { replace: true })
         }
@@ -81,7 +81,7 @@ export default function ProjectPage() {
     }
   }, [projectId, token, upsertDocument, removeDocument])
 
-  // If main_doc_id wasn't available on first load, redirect once docs finish loading
+  // Fall back after the document list loads so older projects still open predictably.
   useEffect(() => {
     if (!loadingDocs && documents.length > 0 && projectId) {
       const mainDoc = documents.find((d) => d.kind === 'latex' && d.title === 'main.tex')
@@ -172,7 +172,6 @@ export default function ProjectPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#0f0f23', color: '#e2e8f0' }}>
-      {/* Nav */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '14px 28px', background: '#16213e', borderBottom: '1px solid #1e1e3a',
@@ -225,7 +224,6 @@ export default function ProjectPage() {
       </div>
 
       <div style={{ display: 'flex', height: 'calc(100vh - 53px)' }}>
-        {/* Documents list */}
         <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
           {currentProject?.description && (
             <p style={{ color: '#6b7280', fontSize: 13, marginBottom: 20 }}>
@@ -308,7 +306,6 @@ export default function ProjectPage() {
           )}
         </div>
 
-        {/* Members panel */}
         {showMembers && (
           <div style={{
             width: 300, borderLeft: '1px solid #1e1e3a', padding: '20px 16px',
@@ -367,7 +364,6 @@ export default function ProjectPage() {
         )}
       </div>
 
-      {/* Invite links modal */}
       {showInvitePanel && (
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
@@ -386,7 +382,6 @@ export default function ProjectPage() {
               </button>
             </div>
 
-            {/* Existing invites */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
               {invites.length === 0 && (
                 <div style={{ color: '#4a4a6a', fontSize: 13, textAlign: 'center', padding: '12px 0' }}>
@@ -430,7 +425,6 @@ export default function ProjectPage() {
               ))}
             </div>
 
-            {/* Create new invite */}
             {invites.length < 3 ? (
               <div style={{ borderTop: '1px solid #1e1e3a', paddingTop: 16 }}>
                 <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>

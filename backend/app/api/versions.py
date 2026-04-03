@@ -168,7 +168,7 @@ async def restore_version(
     doc.content_revision += 1
     await db.commit()
 
-    # Push restored content to any open Yjs rooms
+    # Fan the restored snapshot into active Yjs rooms so collaborators do not keep editing stale state.
     await yjs_handler.invalidate_room(doc_id, ver.content)
 
     await manager.broadcast_to_room(

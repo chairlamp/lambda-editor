@@ -34,7 +34,7 @@ export default function VersionHistoryPanel({ projectId, docId, onClose }: Props
     setSaving(true)
     try {
       const r = await versionsApi.create(projectId, docId, label.trim())
-      // Newest goes to front since list is sorted desc
+      // Keep optimistic ordering aligned with the API so version numbers stay stable.
       setVersions((prev) => [r.data, ...prev])
       setLabel('')
     } finally {
@@ -49,7 +49,7 @@ export default function VersionHistoryPanel({ projectId, docId, onClose }: Props
     try {
       const r = await versionsApi.restore(projectId, docId, v.id)
       updateDocContent(r.data.content)
-      // Reload because a new "before restore" auto-snapshot was created
+      // Reload so the safety snapshot created during restore appears immediately.
       const refreshed = await versionsApi.list(projectId, docId)
       setVersions(refreshed.data)
     } finally {
@@ -100,7 +100,6 @@ export default function VersionHistoryPanel({ projectId, docId, onClose }: Props
             No snapshots yet. Save one above.
           </div>
         )}
-        {/* API already returns newest first; vN = most recent, v1 = oldest */}
         {versions.map((v, i) => {
           const num = versions.length - i
           return (

@@ -47,8 +47,7 @@ export default function EditorPage() {
   const [equationLocation, setEquationLocation] = useState<{ line: number; text: string; beforeText: string; afterText: string } | null>(null)
   const [reconnectingDelayMs, setReconnectingDelayMs] = useState<number | null>(null)
 
-  // syncedYdoc is null until the Yjs provider completes its first sync, preventing
-  // MonacoBinding from binding to an empty Y.Doc before content arrives.
+  // Wait for the first Yjs sync so Monaco never binds to an empty CRDT snapshot.
   const [syncedYdoc, setSyncedYdoc] = useState<Y.Doc | null>(null)
 
   useEffect(() => {
@@ -97,8 +96,6 @@ export default function EditorPage() {
     }
   })()
 
-  // ── Load document via REST ─────────────────────────────────────────────────
-
   useEffect(() => {
     if (!projectId || !docId) return
     setCompiledPdf(null, '')
@@ -114,8 +111,7 @@ export default function EditorPage() {
       .catch(() => navigate(`/projects/${projectId}`))
   }, [projectId, docId, navigate, setCompiledPdf, setCurrentDoc])
 
-  // ── JSON WebSocket (presence, cursors, ai_chat, title, compile_result) ─────
-
+  // Keep lightweight room events separate from Yjs so presence and status stay responsive.
   useEffect(() => {
     if (!docId || !token || !isEditableDoc) {
       setConnected(false)
@@ -182,8 +178,7 @@ export default function EditorPage() {
     }
   }, [docId, token, isEditableDoc, currentDoc?.kind, setConnected, setPresence, updateDocTitle, setCompiledPdf])
 
-  // ── Yjs CRDT WebSocket ────────────────────────────────────────────────────
-
+  // Start Monaco binding only after the provider has real document state to avoid flicker.
   useEffect(() => {
     if (!docId || !isEditableDoc) {
       setSyncedYdoc(null)
@@ -221,8 +216,7 @@ export default function EditorPage() {
     }
   }, [docId, isEditableDoc, updateDocContent])
 
-  // ── Misc cleanup on doc-type change ──────────────────────────────────────
-
+  // Clear LaTeX-only UI state when the current file can no longer use those actions.
   useEffect(() => {
     if (!isEditableDoc) setShowVersionHistory(false)
     if (!isLatexDoc) {

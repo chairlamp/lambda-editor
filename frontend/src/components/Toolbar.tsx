@@ -144,7 +144,6 @@ export default function Toolbar({
           </button>
         )}
 
-        {/* Breadcrumb — title is display-only; rename via file tree */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
           {currentProject && (
             <>
@@ -211,7 +210,6 @@ export default function Toolbar({
 
         <div style={{ flex: 1 }} />
 
-        {/* Reopen buttons — only shown when panel is hidden */}
         {isLatexDoc && !showPreview && (
           <button onClick={onTogglePreview} style={iconBtnStyle} title="Open PDF Preview">
             <Eye size={15} />
@@ -223,21 +221,18 @@ export default function Toolbar({
           </button>
         )}
 
-        {/* Members management (owner only) */}
         {isOwner && projectId && (
           <button onClick={openMembers} style={iconBtnStyle} title="Manage members">
             <Users size={15} />
           </button>
         )}
 
-        {/* Invite links (owner only) */}
         {isOwner && projectId && (
           <button onClick={openInvites} style={iconBtnStyle} title="Manage invite links">
             <Link size={15} />
           </button>
         )}
 
-        {/* Version history */}
         {isEditableDoc && !readOnly && (
           <button
             onClick={onToggleVersionHistory}
@@ -272,7 +267,6 @@ export default function Toolbar({
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
 
-      {/* Invite links modal */}
       {showInvites && (
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
@@ -372,7 +366,6 @@ export default function Toolbar({
         </div>
       )}
 
-      {/* Members modal */}
       {showMembers && (
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
