@@ -135,8 +135,8 @@ async def get_version(
     )
 
 
-@router.post("/{version_id}/restore", response_model=VersionDetail, status_code=200)
-async def restore_version(
+@router.post("/{version_id}/restorations", response_model=VersionDetail, status_code=201)
+async def create_version_restoration(
     project_id: str,
     doc_id: str,
     version_id: str,

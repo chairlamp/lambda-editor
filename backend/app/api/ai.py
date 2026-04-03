@@ -17,22 +17,18 @@ from app.database import get_db
 from app.services import ai_service
 from app.services import agent_service
 
-router = APIRouter(prefix="/ai", tags=["ai"])
+router = APIRouter(tags=["ai"])
 
 
 class GenerateRequest(BaseModel):
     prompt: str
     document_context: Optional[str] = ""
-    project_id: Optional[str] = None
-    doc_id: Optional[str] = None
     action_id: Optional[str] = None
 
 
 class AgentRequest(BaseModel):
     prompt: str
     document_context: Optional[str] = ""
-    project_id: Optional[str] = None
-    doc_id: Optional[str] = None
     action_id: Optional[str] = None
 
 
@@ -40,8 +36,6 @@ class RewriteRequest(BaseModel):
     text: str
     style: str  # academic | simplify | expand | continue | summarize | translate:{lang} | restructure
     document_context: Optional[str] = ""
-    project_id: Optional[str] = None
-    doc_id: Optional[str] = None
     action_id: Optional[str] = None
 
 
@@ -66,8 +60,6 @@ class SuggestChangesRequest(BaseModel):
     instruction: str
     document_content: str
     variation_request: Optional[str] = ""
-    project_id: Optional[str] = None
-    doc_id: Optional[str] = None
     action_id: Optional[str] = None
 
 
@@ -76,8 +68,6 @@ class TranslateDiffRequest(BaseModel):
     text: str = ""
     document_content: str
     variation_request: Optional[str] = ""
-    project_id: Optional[str] = None
-    doc_id: Optional[str] = None
     action_id: Optional[str] = None
 
 
@@ -86,8 +76,6 @@ class RewriteDiffRequest(BaseModel):
     style: str
     document_content: str
     variation_request: Optional[str] = ""
-    project_id: Optional[str] = None
-    doc_id: Optional[str] = None
     action_id: Optional[str] = None
 
 
@@ -103,8 +91,6 @@ class EquationDiffRequest(BaseModel):
     document_content: str
     location: Optional[LocationContext] = None
     variation_request: Optional[str] = ""
-    project_id: Optional[str] = None
-    doc_id: Optional[str] = None
     action_id: Optional[str] = None
 
 
@@ -160,9 +146,7 @@ async def _purge_ai_history(db: AsyncSession, *, doc_id: Optional[str] = None):
     await db.commit()
 
 
-async def _require_document_edit_access(project_id: Optional[str], doc_id: Optional[str], user_id: str, db: AsyncSession):
-    if not project_id or not doc_id:
-        raise HTTPException(status_code=400, detail="Missing project or document context")
+async def _require_document_edit_access(project_id: str, doc_id: str, user_id: str, db: AsyncSession):
     await _require_project(project_id, user_id, db, min_role="editor")
     result = await db.execute(
         select(Document).where(Document.id == doc_id, Document.project_id == project_id)
@@ -239,33 +223,37 @@ def _sse(generator, *, on_complete=None):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-@router.post("/generate")
+@router.post("/projects/{project_id}/documents/{doc_id}/ai/text-generations")
 async def generate(
+    project_id: str,
+    doc_id: str,
     req: GenerateRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_document_edit_access(req.project_id, req.doc_id, current_user.id, db)
+    await _require_document_edit_access(project_id, doc_id, current_user.id, db)
     return _sse(
         ai_service.generate_text(req.prompt, req.document_context or ""),
         on_complete=lambda content: _persist_assistant_message(
             db,
             current_user.id,
-            req.project_id,
-            req.doc_id,
+            project_id,
+            doc_id,
             f"{req.action_id}-res" if req.action_id else None,
             content=content,
         ),
     )
 
 
-@router.post("/agent")
+@router.post("/projects/{project_id}/documents/{doc_id}/ai/messages")
 async def agent_chat(
+    project_id: str,
+    doc_id: str,
     req: AgentRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_document_edit_access(req.project_id, req.doc_id, current_user.id, db)
+    await _require_document_edit_access(project_id, doc_id, current_user.id, db)
     try:
         result = await agent_service.run_tool_enabled_chat(req.prompt, req.document_context or "")
     except RuntimeError as exc:
@@ -274,8 +262,8 @@ async def agent_chat(
     await _persist_assistant_message(
         db,
         current_user.id,
-        req.project_id,
-        req.doc_id,
+        project_id,
+        doc_id,
         f"{req.action_id}-res" if req.action_id else None,
         content=result.get("content", ""),
         sources=result.get("sources") or None,
@@ -284,60 +272,64 @@ async def agent_chat(
     return result
 
 
-@router.post("/rewrite")
+@router.post("/projects/{project_id}/documents/{doc_id}/ai/rewrites")
 async def rewrite(
+    project_id: str,
+    doc_id: str,
     req: RewriteRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_document_edit_access(req.project_id, req.doc_id, current_user.id, db)
+    await _require_document_edit_access(project_id, doc_id, current_user.id, db)
     return _sse(
         ai_service.rewrite_text(req.text, req.style, req.document_context or ""),
         on_complete=lambda content: _persist_assistant_message(
             db,
             current_user.id,
-            req.project_id,
-            req.doc_id,
+            project_id,
+            doc_id,
             f"{req.action_id}-res" if req.action_id else None,
             content=content,
         ),
     )
 
 
-@router.post("/fix-latex")
+@router.post("/ai/latex-fixes")
 async def fix_latex(req: FixLatexRequest, current_user: User = Depends(get_current_user)):
     return _sse(ai_service.fix_latex(req.code, req.error_log))
 
 
-@router.post("/equation")
+@router.post("/ai/equations")
 async def equation(req: EquationRequest, current_user: User = Depends(get_current_user)):
     return _sse(ai_service.generate_equation(req.description))
 
 
-@router.post("/convert")
+@router.post("/ai/latex-conversions")
 async def convert(req: ConvertRequest, current_user: User = Depends(get_current_user)):
     return _sse(ai_service.convert_to_latex(req.plain_text))
 
 
-@router.post("/explain-error")
+@router.post("/ai/error-explanations")
 async def explain_error(req: ExplainErrorRequest, current_user: User = Depends(get_current_user)):
     return _sse(ai_service.explain_error(req.error_log))
 
 
-@router.post("/suggest-changes")
+@router.post("/projects/{project_id}/documents/{doc_id}/ai/change-suggestions")
 async def suggest_changes(
+    project_id: str,
+    doc_id: str,
     req: SuggestChangesRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Return a structured JSON diff: explanation + list of hunks with old_text/new_text."""
-    await _require_document_edit_access(req.project_id, req.doc_id, current_user.id, db)
+    await _require_document_edit_access(project_id, doc_id, current_user.id, db)
     result = await ai_service.suggest_changes(req.instruction, req.document_content, req.variation_request or "")
     await _persist_assistant_message(
         db,
         current_user.id,
-        req.project_id,
-        req.doc_id,
+        project_id,
+        doc_id,
         f"{req.action_id}-diff" if req.action_id else None,
         diff=result,
         retry_action={"type": "suggest", "instruction": req.instruction},
@@ -345,19 +337,21 @@ async def suggest_changes(
     return result
 
 
-@router.post("/rewrite-diff")
+@router.post("/projects/{project_id}/documents/{doc_id}/ai/rewrite-suggestions")
 async def rewrite_diff(
+    project_id: str,
+    doc_id: str,
     req: RewriteDiffRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_document_edit_access(req.project_id, req.doc_id, current_user.id, db)
+    await _require_document_edit_access(project_id, doc_id, current_user.id, db)
     result = await ai_service.rewrite_diff(req.text, req.style, req.document_content, req.variation_request or "")
     await _persist_assistant_message(
         db,
         current_user.id,
-        req.project_id,
-        req.doc_id,
+        project_id,
+        doc_id,
         f"{req.action_id}-diff" if req.action_id else None,
         diff=result,
         retry_action={"type": req.style, "text": req.text},
@@ -365,13 +359,15 @@ async def rewrite_diff(
     return result
 
 
-@router.post("/translate-diff")
+@router.post("/projects/{project_id}/documents/{doc_id}/ai/translation-suggestions")
 async def translate_diff(
+    project_id: str,
+    doc_id: str,
     req: TranslateDiffRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_document_edit_access(req.project_id, req.doc_id, current_user.id, db)
+    await _require_document_edit_access(project_id, doc_id, current_user.id, db)
     result = await agent_service.translate_diff_with_tool(
         req.language,
         req.text,
@@ -381,8 +377,8 @@ async def translate_diff(
     await _persist_assistant_message(
         db,
         current_user.id,
-        req.project_id,
-        req.doc_id,
+        project_id,
+        doc_id,
         f"{req.action_id}-diff" if req.action_id else None,
         diff=result,
         retry_action={
@@ -395,13 +391,15 @@ async def translate_diff(
     return result
 
 
-@router.post("/equation-diff")
+@router.post("/projects/{project_id}/documents/{doc_id}/ai/equation-suggestions")
 async def equation_diff(
+    project_id: str,
+    doc_id: str,
     req: EquationDiffRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_document_edit_access(req.project_id, req.doc_id, current_user.id, db)
+    await _require_document_edit_access(project_id, doc_id, current_user.id, db)
     result = await ai_service.equation_diff(
         req.description,
         req.document_content,
@@ -411,8 +409,8 @@ async def equation_diff(
     await _persist_assistant_message(
         db,
         current_user.id,
-        req.project_id,
-        req.doc_id,
+        project_id,
+        doc_id,
         f"{req.action_id}-diff" if req.action_id else None,
         diff=result,
         retry_action={
@@ -424,7 +422,7 @@ async def equation_diff(
     return result
 
 
-@router.get("/history/{project_id}/{doc_id}", response_model=list[ChatHistoryMessageResponse])
+@router.get("/projects/{project_id}/documents/{doc_id}/ai/messages", response_model=list[ChatHistoryMessageResponse])
 async def get_history(
     project_id: str,
     doc_id: str,
@@ -468,8 +466,8 @@ async def get_history(
     ]
 
 
-@router.patch("/history/{project_id}/{doc_id}/{message_id}/review")
-async def update_review_state(
+@router.patch("/projects/{project_id}/documents/{doc_id}/ai/messages/{message_id}")
+async def update_message_review_state(
     project_id: str,
     doc_id: str,
     message_id: str,

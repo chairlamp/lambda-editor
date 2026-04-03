@@ -33,7 +33,7 @@ export const projectsApi = {
   update: (id: string, data: { title?: string; description?: string }) =>
     api.patch(`/projects/${id}`, data),
   delete: (id: string) => api.delete(`/projects/${id}`),
-  join: (invite_token: string) => api.post('/projects/join', { invite_token }),
+  join: (invite_token: string) => api.post('/projects/memberships', { invite_token }),
   listMembers: (id: string) => api.get(`/projects/${id}/members`),
   updateMemberRole: (projectId: string, userId: string, role: string) =>
     api.patch(`/projects/${projectId}/members/${userId}`, { role }),
@@ -57,7 +57,7 @@ export const docsApi = {
     const formData = new FormData()
     formData.append('file', file)
     if (path?.trim()) formData.append('path', path.trim())
-    return api.post(`/projects/${projectId}/documents/upload`, formData, {
+    return api.post(`/projects/${projectId}/documents/uploaded-documents`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
@@ -79,29 +79,26 @@ export const versionsApi = {
   get: (projectId: string, docId: string, versionId: string) =>
     api.get(`/projects/${projectId}/documents/${docId}/versions/${versionId}`),
   restore: (projectId: string, docId: string, versionId: string) =>
-    api.post(`/projects/${projectId}/documents/${docId}/versions/${versionId}/restore`),
+    api.post(`/projects/${projectId}/documents/${docId}/versions/${versionId}/restorations`),
 }
 
 export const compileApi = {
-  compile: (content: string, projectId?: string, docId?: string, outputFormat = 'pdf') => api.post('/compile', {
+  compile: (content: string, projectId: string, docId: string, outputFormat = 'pdf') => api.post(`/projects/${projectId}/documents/${docId}/compilations`, {
     content,
-    project_id: projectId,
-    doc_id: docId,
     output_format: outputFormat,
   }),
 }
 
 export const aiChatApi = {
-  agent: (payload: {
+  agent: (projectId: string, docId: string, payload: {
     prompt: string
     document_context?: string
-    project_id?: string
-    doc_id?: string
     action_id?: string
-  }) => api.post('/ai/agent', payload),
-  history: (projectId: string, docId: string) => api.get(`/ai/history/${projectId}/${docId}`),
+  }) => api.post(`/projects/${projectId}/documents/${docId}/ai/messages`, payload),
+  history: (projectId: string, docId: string) =>
+    api.get(`/projects/${projectId}/documents/${docId}/ai/messages`),
   updateReviewState: (projectId: string, docId: string, messageId: string, accepted: string[], rejected: string[]) =>
-    api.patch(`/ai/history/${projectId}/${docId}/${messageId}/review`, { accepted, rejected }),
+    api.patch(`/projects/${projectId}/documents/${docId}/ai/messages/${messageId}`, { accepted, rejected }),
 }
 
 // Parse streamed `data:` frames so chat UIs can render long responses incrementally.

@@ -311,11 +311,9 @@ export default function AIChat({
     addUserMsg({ role: 'user', content: text, quotes: currentQuotes }, aid)
     broadcast({ event: 'user_msg', content: text, quotes: currentQuotes, action_id: aid })
     try {
-      const res = await aiChatApi.agent({
+      const res = await aiChatApi.agent(currentDoc?.project_id || '', currentDoc?.id || '', {
         prompt: fullPrompt,
         document_context: currentDoc?.content ?? '',
-        project_id: currentDoc?.project_id,
-        doc_id: currentDoc?.id,
         action_id: aid,
       })
       addAssistantMsg(
@@ -350,42 +348,34 @@ export default function AIChat({
     try {
       let res
       if (request.type === 'equation') {
-        res = await api.post('/ai/equation-diff', {
+        res = await api.post(`/projects/${currentDoc?.project_id}/documents/${currentDoc?.id}/ai/equation-suggestions`, {
           description: request.description,
           document_content: currentDoc?.content || '',
           location: request.location,
           variation_request: variationRequest,
-          project_id: currentDoc?.project_id,
-          doc_id: currentDoc?.id,
           action_id: aid,
         })
       } else if (request.type === 'translate') {
-        res = await api.post('/ai/translate-diff', {
+        res = await api.post(`/projects/${currentDoc?.project_id}/documents/${currentDoc?.id}/ai/translation-suggestions`, {
           language: request.language,
           text: request.text,
           document_content: currentDoc?.content || '',
           variation_request: variationRequest,
-          project_id: currentDoc?.project_id,
-          doc_id: currentDoc?.id,
           action_id: aid,
         })
       } else if (request.type === 'suggest') {
-        res = await api.post('/ai/suggest-changes', {
+        res = await api.post(`/projects/${currentDoc?.project_id}/documents/${currentDoc?.id}/ai/change-suggestions`, {
           instruction: request.instruction,
           document_content: currentDoc?.content || '',
           variation_request: variationRequest,
-          project_id: currentDoc?.project_id,
-          doc_id: currentDoc?.id,
           action_id: aid,
         })
       } else {
-        res = await api.post('/ai/rewrite-diff', {
+        res = await api.post(`/projects/${currentDoc?.project_id}/documents/${currentDoc?.id}/ai/rewrite-suggestions`, {
           text: request.text,
           style: request.type,
           document_content: currentDoc?.content || '',
           variation_request: variationRequest,
-          project_id: currentDoc?.project_id,
-          doc_id: currentDoc?.id,
           action_id: aid,
         })
       }
@@ -440,12 +430,10 @@ export default function AIChat({
       addUserMsg({ role: 'user', content: '', quotes: currentQuotes, actionType: 'summarize', actionPrompt }, aid)
       broadcast({ event: 'user_msg', action_type: 'summarize', action_prompt: actionPrompt, quotes: currentQuotes, action_id: aid })
       setLoading(true)
-      await runStream('/ai/rewrite', {
+      await runStream(`/projects/${currentDoc?.project_id}/documents/${currentDoc?.id}/ai/rewrites`, {
         text,
         style: 'summarize',
         document_context: currentDoc?.content ?? '',
-        project_id: currentDoc?.project_id,
-        doc_id: currentDoc?.id,
         action_id: aid,
       }, aid)
       return

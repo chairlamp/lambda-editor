@@ -263,8 +263,8 @@ async def create_document(
     return doc
 
 
-@router.post("/upload", response_model=DocumentResponse, status_code=201)
-async def upload_document(
+@router.post("/uploaded-documents", response_model=DocumentResponse, status_code=201)
+async def create_uploaded_document(
     project_id: str,
     file: UploadFile = File(...),
     path: Optional[str] = Form(None),

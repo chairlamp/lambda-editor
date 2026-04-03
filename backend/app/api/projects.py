@@ -297,8 +297,8 @@ async def delete_invite(
     await db.commit()
 
 
-@router.post("/join", response_model=ProjectOut, status_code=201)
-async def join_project(
+@router.post("/memberships", response_model=ProjectOut, status_code=201)
+async def create_project_membership(
     data: JoinRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
