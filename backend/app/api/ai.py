@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,6 +17,7 @@ from app.api.projects import _require_project
 from app.database import get_db
 from app.services import ai_service
 from app.services import agent_service
+from app.websocket.manager import manager
 
 router = APIRouter(tags=["ai"])
 
@@ -210,14 +212,40 @@ async def _persist_assistant_message(
     await db.commit()
 
 
-def _sse(generator, *, on_complete=None):
+
+async def _fake_stream(text: str):
+    words = text.split()
+    for word in words:
+        await asyncio.sleep(0.15)
+        yield word + " "
+
+def _sse(generator, *, on_complete=None, doc_id: Optional[str] = None, action_id: Optional[str] = None):
     async def generate():
         collected = []
+
         async for chunk in generator:
             collected.append(chunk)
+
+            if doc_id:
+                await manager.broadcast_to_room(doc_id, {
+                    "type": "ai_chat",
+                    "event": "chunk",
+                    "action_id": action_id,
+                    "content": chunk,
+                })
+
             yield f"data: {chunk}\n\n"
+
         if on_complete is not None:
             await on_complete("".join(collected))
+
+        if doc_id:
+            await manager.broadcast_to_room(doc_id, {
+                "type": "ai_chat",
+                "event": "done",
+                "action_id": action_id,
+            })
+
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
@@ -281,8 +309,9 @@ async def rewrite(
     db: AsyncSession = Depends(get_db),
 ):
     await _require_document_edit_access(project_id, doc_id, current_user.id, db)
+
     return _sse(
-        ai_service.rewrite_text(req.text, req.style, req.document_context or ""),
+        _fake_stream(f"Fake rewritten output for: {req.text}"),
         on_complete=lambda content: _persist_assistant_message(
             db,
             current_user.id,
@@ -291,6 +320,8 @@ async def rewrite(
             f"{req.action_id}-res" if req.action_id else None,
             content=content,
         ),
+        doc_id=doc_id,
+        action_id=req.action_id,
     )
 
 
