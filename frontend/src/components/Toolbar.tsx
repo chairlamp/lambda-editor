@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Save, Wifi, WifiOff, Loader2, History, ArrowLeft, Bot, Eye, Lock, Link, Copy, Check, Trash2, Plus, X, Users } from 'lucide-react'
 import { useStore, Presence } from '../store/useStore'
-import { docsApi, projectsApi } from '../services/api'
+import { authApi, docsApi, projectsApi } from '../services/api'
 
 interface Props {
   onToggleAI: () => void
@@ -127,6 +127,14 @@ export default function Toolbar({
     if (!projectId) return
     await projectsApi.removeMember(projectId, memberId)
     setMembers((prev) => prev.filter((m) => m.user_id !== memberId))
+  }
+
+  const signOut = async () => {
+    try {
+      await authApi.logout()
+    } finally {
+      logout()
+    }
   }
 
   const isOwner = currentProject?.my_role === 'owner'
@@ -259,7 +267,7 @@ export default function Toolbar({
           }}>
             {user?.username?.[0]?.toUpperCase() || '?'}
           </div>
-          <button onClick={logout} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 11, cursor: 'pointer' }}>
+          <button onClick={signOut} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 11, cursor: 'pointer' }}>
             Logout
           </button>
         </div>

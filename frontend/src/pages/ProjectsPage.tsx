@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FolderOpen, Plus, Trash2, LogOut, Users } from 'lucide-react'
-import { projectsApi } from '../services/api'
+import { authApi, projectsApi } from '../services/api'
 import { useStore } from '../store/useStore'
 
 export default function ProjectsPage() {
@@ -50,6 +50,14 @@ export default function ProjectsPage() {
     }
   }
 
+  const signOut = async () => {
+    try {
+      await authApi.logout()
+    } finally {
+      logout()
+    }
+  }
+
   return (
     <div style={{ minHeight: '100vh', background: '#0f0f23', color: '#e2e8f0' }}>
       <div style={{
@@ -62,7 +70,7 @@ export default function ProjectsPage() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <span style={{ fontSize: 13, color: '#9ca3af' }}>{user?.username}</span>
-          <button onClick={logout} style={ghostBtn}>
+          <button onClick={signOut} style={ghostBtn}>
             <LogOut size={14} /> Sign out
           </button>
         </div>

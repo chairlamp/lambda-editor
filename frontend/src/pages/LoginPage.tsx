@@ -1,5 +1,5 @@
-import { useState, FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState, FormEvent } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { authApi } from '../services/api'
 import { useStore } from '../store/useStore'
 
@@ -10,8 +10,16 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const { setUser } = useStore()
+  const { token, authReady, setUser } = useStore()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const nextPath = searchParams.get('next') || '/projects'
+
+  useEffect(() => {
+    if (authReady && token) {
+      navigate(nextPath, { replace: true })
+    }
+  }, [authReady, navigate, nextPath, token])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -26,7 +34,7 @@ export default function LoginPage() {
       }
       const { user } = res.data
       setUser(user, 'session')
-      navigate('/projects')
+      navigate(nextPath, { replace: true })
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'Something went wrong')
     } finally {

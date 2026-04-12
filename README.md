@@ -34,7 +34,7 @@ This is Lambda. My team's project for AI1220: a remake of Overleaf with AI featu
 | Frontend | React 18, TypeScript, Vite, Zustand, Monaco Editor |
 | Backend | FastAPI, SQLAlchemy async, PostgreSQL, WebSockets |
 | AI | OpenAI Responses API for tool-enabled chat, OpenAI streaming for rewrite/generation actions, Google Cloud Translation API for translation tool calls |
-| Auth | Redis-backed server-side sessions with HTTP-only cookies |
+| Auth | JWT access/refresh tokens delivered via HTTP-only cookies, with Redis-backed refresh-token rotation |
 | Collaboration | Yjs CRDT (`pycrdt` on server, `y-websocket` + `y-monaco` on client), Redis-backed CRDT state/pub-sub, Redis pub/sub for presence and project events |
 | Output | Rendered export to `PDF`, `DVI`, and `PS` via `pdflatex`, `xelatex`, `lualatex`, or `tectonic` |
 | Default storage | PostgreSQL via `postgresql+asyncpg` |
@@ -71,9 +71,12 @@ Update `backend/.env` with your values:
 SECRET_KEY=your-secret-key-change-in-production
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/lambda_editor
 REDIS_URL=redis://localhost:6379/0
-SESSION_COOKIE_NAME=lambda_session
-SESSION_TTL_SECONDS=604800
-SESSION_COOKIE_SECURE=false
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_COOKIE_NAME=lambda_access_token
+REFRESH_TOKEN_COOKIE_NAME=lambda_refresh_token
+ACCESS_TOKEN_TTL_SECONDS=900
+REFRESH_TOKEN_TTL_SECONDS=604800
+AUTH_COOKIE_SECURE=false
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o
 OPENAI_BASE_URL=https://api.openai.com/v1

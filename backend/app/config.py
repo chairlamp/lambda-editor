@@ -8,9 +8,12 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me"
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/lambda_editor"
     REDIS_URL: str = "redis://localhost:6379/0"
-    SESSION_COOKIE_NAME: str = "lambda_session"
-    SESSION_TTL_SECONDS: int = 60 * 60 * 24 * 7
-    SESSION_COOKIE_SECURE: bool = False
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_COOKIE_NAME: str = "lambda_access_token"
+    REFRESH_TOKEN_COOKIE_NAME: str = "lambda_refresh_token"
+    ACCESS_TOKEN_TTL_SECONDS: int = 60 * 15
+    REFRESH_TOKEN_TTL_SECONDS: int = 60 * 60 * 24 * 7
+    AUTH_COOKIE_SECURE: bool = False
 
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o"

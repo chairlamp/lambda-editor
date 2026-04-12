@@ -49,8 +49,9 @@ async def health():
 
 
 async def _authenticate_ws(websocket: WebSocket):
-    session_id = websocket.cookies.get(settings.SESSION_COOKIE_NAME)
-    user_id = await auth.get_session_user_id(session_id)
+    access_token = websocket.cookies.get(settings.ACCESS_TOKEN_COOKIE_NAME)
+    refresh_token = websocket.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
+    user_id = await auth.get_authenticated_user_id_from_cookies(access_token, refresh_token)
     return {"user_id": user_id} if user_id else None
 
 

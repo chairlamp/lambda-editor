@@ -1,17 +1,78 @@
-import axios from 'axios'
+import axios, { type InternalAxiosRequestConfig } from 'axios'
+
+import { useStore, type User } from '../store/useStore'
 
 const api = axios.create({ baseURL: '/api', withCredentials: true })
+let refreshRequest: Promise<void> | null = null
+
+function markAuthenticated(user: User) {
+  useStore.getState().setUser(user, 'session')
+}
+
+function clearAuth(redirectToLogin = true) {
+  useStore.getState().logout()
+  if (!redirectToLogin || window.location.pathname === '/login') return
+
+  const next = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  window.location.href = `/login?next=${encodeURIComponent(next)}`
+}
+
+export async function refreshAuthSession(): Promise<void> {
+  if (!refreshRequest) {
+    refreshRequest = axios.post('/api/tokens/refresh', undefined, { withCredentials: true })
+      .then((res) => {
+        markAuthenticated(res.data.user)
+      })
+      .catch((err) => {
+        clearAuth(window.location.pathname !== '/login')
+        throw err
+      })
+      .finally(() => {
+        refreshRequest = null
+      })
+  }
+
+  return refreshRequest
+}
 
 // Handle expired sessions in one place so feature code can treat 401s uniformly.
 api.interceptors.response.use(
   (r) => r,
-  (err) => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      window.location.href = '/login'
+  async (err) => {
+    const status = err.response?.status
+    const originalRequest = err.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined
+    const url = originalRequest?.url ?? ''
+
+    if (status !== 401) {
+      return Promise.reject(err)
     }
-    return Promise.reject(err)
+
+    if (url === '/tokens' || url === '/users') {
+      return Promise.reject(err)
+    }
+
+    if (url === '/tokens/refresh') {
+      clearAuth(window.location.pathname !== '/login')
+      return Promise.reject(err)
+    }
+
+    if (url === '/sessions/me') {
+      clearAuth(false)
+      return Promise.reject(err)
+    }
+
+    if (!originalRequest || originalRequest._retry) {
+      clearAuth(window.location.pathname !== '/login')
+      return Promise.reject(err)
+    }
+
+    originalRequest._retry = true
+    try {
+      await refreshAuthSession()
+      return api(originalRequest)
+    } catch {
+      return Promise.reject(err)
+    }
   }
 )
 
@@ -22,6 +83,7 @@ export const authApi = {
     api.post('/users', { email, username, password }),
   login: (email: string, password: string) =>
     api.post('/tokens', { email, password }),
+  refresh: () => api.post('/tokens/refresh'),
   logout: () => api.delete('/sessions/me'),
   me: () => api.get('/users/me'),
 }
@@ -109,12 +171,24 @@ export async function streamAI(
   onDone: () => void,
   onError: (err: string) => void
 ): Promise<void> {
-  const res = await fetch(`/api${endpoint}`, {
+  const makeRequest = () => fetch(`/api${endpoint}`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+
+  let res = await makeRequest()
+
+  if (res.status === 401) {
+    try {
+      await refreshAuthSession()
+      res = await makeRequest()
+    } catch {
+      onError('Request failed: 401')
+      return
+    }
+  }
 
   if (!res.ok) {
     onError(`Request failed: ${res.status}`)
