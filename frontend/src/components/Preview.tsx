@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle, ChevronDown, Download, FileText, Loader2, X }
 import { compileApi } from '../services/api'
 import { RoomSocket } from '../services/socket'
 import { useStore } from '../store/useStore'
+import { C } from '../design'
 
 interface Props {
   onClose?: () => void
@@ -79,17 +80,25 @@ export default function Preview({ onClose, socket }: Props) {
   const pdfUrl = compiledPdf ? `data:application/pdf;base64,${compiledPdf}` : null
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#1a1a2e' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: C.bgBase }}>
+      {/* Header */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
-        background: '#16213e', borderBottom: '1px solid #2a2a4a',
+        display: 'flex', alignItems: 'center', gap: 7, padding: '0 12px',
+        height: 42, background: C.bgRaised, borderBottom: `1px solid ${C.borderFaint}`,
+        flexShrink: 0,
       }}>
         <button
           onClick={compilePdf}
           disabled={isCompiling || !currentDoc}
-          style={primaryButton(isCompiling)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            padding: '5px 12px', borderRadius: 6, border: 'none',
+            background: isCompiling || !currentDoc ? C.bgActive : C.accent,
+            color: '#fff', cursor: isCompiling || !currentDoc ? 'not-allowed' : 'pointer',
+            fontSize: 12.5, fontWeight: 500, fontFamily: 'inherit',
+          }}
         >
-          {isCompiling ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <FileText size={14} />}
+          {isCompiling ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <FileText size={13} />}
           {isCompiling ? 'Rendering…' : 'Render PDF'}
         </button>
 
@@ -97,44 +106,42 @@ export default function Preview({ onClose, socket }: Props) {
           <button
             onClick={() => !isExporting && setShowExportMenu((v) => !v)}
             disabled={isExporting || !currentDoc}
-            style={secondaryButton(isExporting)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: '5px 10px', borderRadius: 6,
+              border: `1px solid ${C.border}`, background: 'transparent',
+              color: C.textSecondary,
+              cursor: isExporting || !currentDoc ? 'not-allowed' : 'pointer',
+              fontSize: 12.5, fontFamily: 'inherit',
+            }}
           >
-            {isExporting ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Download size={14} />}
+            {isExporting ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Download size={13} />}
             Export
-            <ChevronDown size={13} />
+            <ChevronDown size={12} />
           </button>
 
           {showExportMenu && !isExporting && currentDoc && (
             <div style={{
-              position: 'absolute',
-              top: 'calc(100% + 6px)',
-              left: 0,
-              minWidth: 160,
-              background: '#0f172a',
-              border: '1px solid #334155',
-              borderRadius: 8,
-              boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
-              overflow: 'hidden',
-              zIndex: 20,
+              position: 'absolute', top: 'calc(100% + 5px)', left: 0,
+              minWidth: 150, background: C.bgCard,
+              border: `1px solid ${C.border}`, borderRadius: 8,
+              boxShadow: '0 10px 30px rgba(0,0,0,0.4)',
+              overflow: 'hidden', zIndex: 20,
             }}>
               {EXPORT_FORMATS.map((format) => (
                 <button
                   key={format}
                   onClick={() => void exportRenderedFile(format)}
                   style={{
-                    display: 'flex',
-                    width: '100%',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '9px 12px',
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#e2e8f0',
-                    fontSize: 12,
-                    cursor: 'pointer',
+                    display: 'flex', width: '100%', alignItems: 'center',
+                    padding: '9px 13px', background: 'transparent',
+                    border: 'none', color: C.textSecondary, fontSize: 12.5,
+                    cursor: 'pointer', fontFamily: 'inherit',
                   }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = C.bgHover; e.currentTarget.style.color = C.textPrimary }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.textSecondary }}
                 >
-                  <span>Export {format.toUpperCase()}</span>
+                  Export {format.toUpperCase()}
                 </button>
               ))}
             </div>
@@ -142,20 +149,21 @@ export default function Preview({ onClose, socket }: Props) {
         </div>
 
         {compiledPdf && !isCompiling && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#4ade80', fontSize: 12 }}>
-            <CheckCircle size={12} /> PDF ready
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: C.green, fontSize: 11.5 }}>
+            <CheckCircle size={11} /> PDF ready
           </span>
         )}
 
         <div style={{ flex: 1 }} />
 
         {onClose && (
-          <button onClick={onClose} style={closeBtnStyle} title="Close preview">
+          <button onClick={onClose} style={closeBtn} title="Close preview">
             <X size={12} />
           </button>
         )}
       </div>
 
+      {/* PDF viewer */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
         {pdfUrl ? (
           <iframe
@@ -166,69 +174,36 @@ export default function Preview({ onClose, socket }: Props) {
         ) : (
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',
-            justifyContent: 'center', height: '100%', gap: 12, color: '#666',
+            justifyContent: 'center', height: '100%', gap: 10,
           }}>
-            <FileText size={48} />
-            <p style={{ fontSize: 14, margin: 0 }}>Render PDF to preview here.</p>
-            <p style={{ fontSize: 12, margin: 0 }}>Other export formats download directly.</p>
+            <FileText size={36} color={C.textDisabled} strokeWidth={1.2} />
+            <p style={{ fontSize: 13, color: C.textSecondary, margin: 0 }}>Render PDF to preview here</p>
+            <p style={{ fontSize: 11.5, color: C.textMuted, margin: 0 }}>Other formats download directly</p>
           </div>
         )}
       </div>
 
+      {/* Compile log */}
       {compileLog && (
         <div style={{
-          maxHeight: 140, overflow: 'auto', background: '#0d0d1a',
-          borderTop: '1px solid #2a2a4a', padding: '8px 12px',
+          maxHeight: 140, overflow: 'auto', background: C.bgBase,
+          borderTop: `1px solid ${C.borderFaint}`, padding: '8px 12px',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, color: compiledPdf ? '#4ade80' : '#f87171', fontSize: 12 }}>
-            {compiledPdf ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5, color: compiledPdf ? C.green : C.red, fontSize: 11.5 }}>
+            {compiledPdf ? <CheckCircle size={11} /> : <AlertCircle size={11} />}
             <span style={{ fontWeight: 600 }}>{compiledPdf ? 'Compilation log' : 'Error log'}</span>
           </div>
-          <pre style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
+          <pre style={{ fontSize: 10.5, color: C.textMuted, whiteSpace: 'pre-wrap', fontFamily: 'monospace', margin: 0 }}>
             {compileLog}
           </pre>
         </div>
       )}
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
 
-function primaryButton(disabled: boolean): React.CSSProperties {
-  return {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '6px 14px',
-    borderRadius: 6,
-    border: 'none',
-    background: disabled ? '#3a3a5a' : '#4f46e5',
-    color: '#fff',
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    fontSize: 13,
-    fontWeight: 600,
-  }
-}
-
-function secondaryButton(disabled: boolean): React.CSSProperties {
-  return {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '6px 12px',
-    borderRadius: 6,
-    border: '1px solid #334155',
-    background: disabled ? '#111827' : '#0f172a',
-    color: '#e2e8f0',
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    fontSize: 12,
-    fontWeight: 600,
-  }
-}
-
-const closeBtnStyle: React.CSSProperties = {
+const closeBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
-  width: 22, height: 22, borderRadius: 4, border: '1px solid #2a2a4a',
-  background: 'transparent', color: '#6b7280', cursor: 'pointer', flexShrink: 0,
+  width: 24, height: 24, borderRadius: 5, border: `1px solid ${C.border}`,
+  background: 'transparent', color: C.textMuted, cursor: 'pointer', flexShrink: 0,
 }

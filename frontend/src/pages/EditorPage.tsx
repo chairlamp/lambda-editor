@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { C } from '../design'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import AIChat from '../components/AIChat'
@@ -27,7 +28,7 @@ export default function EditorPage() {
   const {
     token, currentDoc, setCurrentDoc, setPresence, setConnected,
     updateDocContent, updateDocTitle, setCompiledPdf,
-    isConnected, user,
+    isConnected, user, setTypingUser, clearTypingUsers,
   } = useStore()
 
   const socketRef = useRef<RoomSocket | null>(null)
@@ -166,6 +167,10 @@ export default function EditorPage() {
           return next
         })
       }),
+      socket.on('typing', (msg: any) => {
+        if (!msg.user_id || !msg.username) return
+        setTypingUser({ user_id: msg.user_id as string, username: msg.username as string }, !!msg.is_typing)
+      }),
     ]
 
     socket.connect()
@@ -175,8 +180,9 @@ export default function EditorPage() {
       socket.destroy()
       setConnected(false)
       socketRef.current = null
+      clearTypingUsers()
     }
-  }, [docId, token, isEditableDoc, currentDoc?.kind, setConnected, setPresence, updateDocTitle, setCompiledPdf])
+  }, [docId, token, isEditableDoc, currentDoc?.kind, setConnected, setPresence, updateDocTitle, setCompiledPdf, setTypingUser, clearTypingUsers])
 
   // Start Monaco binding only after the provider has real document state to avoid flicker.
   useEffect(() => {
@@ -272,7 +278,7 @@ export default function EditorPage() {
   }, [aiWidth])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', background: '#1e1e2e' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', background: C.bgBase }}>
       <Toolbar
         onToggleAI={() => setShowAI((v) => {
           const next = !v
@@ -296,8 +302,9 @@ export default function EditorPage() {
       {isEditableDoc && (!readOnly && !isConnected) && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: 12, padding: '8px 14px', background: '#3f1d2e', borderBottom: '1px solid #6b2147',
-          color: '#fecdd3', fontSize: 12,
+          gap: 12, padding: '7px 14px', background: C.redSubtle,
+          borderBottom: `1px solid rgba(248,113,113,0.15)`,
+          color: C.red, fontSize: 12,
         }}>
           <span>
             Offline mode. Changes will sync automatically when reconnected.
@@ -307,7 +314,7 @@ export default function EditorPage() {
       )}
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid #1e1e3a', overflow: 'hidden' }}>
+        <div style={{ width: 234, flexShrink: 0, borderRight: `1px solid ${C.borderFaint}`, overflow: 'hidden' }}>
           <FileTree projectId={projectId} />
         </div>
 
@@ -336,8 +343,8 @@ export default function EditorPage() {
           <>
             <div
               onMouseDown={startDragPreview}
-              style={{ width: 4, flexShrink: 0, cursor: 'col-resize', background: 'transparent', borderLeft: '1px solid #1e1e3a' }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = '#4f46e5')}
+              style={{ width: 4, flexShrink: 0, cursor: 'col-resize', background: 'transparent', borderLeft: `1px solid ${C.borderFaint}` }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = C.accent)}
               onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
             />
             <div style={{ width: previewWidth, flexShrink: 0, overflow: 'hidden' }}>
@@ -350,8 +357,8 @@ export default function EditorPage() {
           <>
             <div
               onMouseDown={startDragAI}
-              style={{ width: 4, flexShrink: 0, cursor: 'col-resize', background: 'transparent', borderLeft: '1px solid #1e1e3a' }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = '#4f46e5')}
+              style={{ width: 4, flexShrink: 0, cursor: 'col-resize', background: 'transparent', borderLeft: `1px solid ${C.borderFaint}` }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = C.accent)}
               onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
             />
             <div style={{ width: aiWidth, flexShrink: 0, overflow: 'hidden' }}>

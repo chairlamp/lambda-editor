@@ -50,7 +50,7 @@ const LATEX_SNIPPETS = [
 ]
 
 export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRegisterTextInserter, onRegisterGetCursorPos, onCursorMove, onSelectionQuote, pickingLocation, onLocationPicked, ownUsername, ownColor, language = 'plaintext' }: Props) {
-  const { currentDoc, updateDocContent } = useStore()
+  const { currentDoc, updateDocContent, setSaveStatus } = useStore()
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof Monaco | null>(null)
   const isRemoteUpdate = useRef(false)
@@ -65,6 +65,9 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
 
   const [selPopup, setSelPopup] = useState<SelectionPopup | null>(null)
   const [editorReady, setEditorReady] = useState(false)
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isTypingRef = useRef(false)
 
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor
@@ -271,13 +274,54 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
     decorationIds.current = editor.deltaDecorations(decorationIds.current, newDecorations)
   }, [remoteDecorations])
 
+  // Fire typing indicator and save-status updates on any local content change.
+  const handleLocalEdit = useCallback(() => {
+    if (readOnly) return
+    // Save status: mark as saving; reset timer to "saved" 3s after the last keystroke.
+    setSaveStatus('saving')
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => setSaveStatus('saved'), 3000)
+
+    // Typing indicator: start indicator if not already active; stop after 3s of silence.
+    if (!isTypingRef.current) {
+      isTypingRef.current = true
+      socketRef.current?.sendTyping(true)
+    }
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
+    typingTimerRef.current = setTimeout(() => {
+      isTypingRef.current = false
+      socketRef.current?.sendTyping(false)
+    }, 3000)
+  }, [readOnly, setSaveStatus])
+
+  // For Yjs-backed docs, watch the Y.Text directly for local transaction events.
+  useEffect(() => {
+    if (!ydoc) return
+    const ytext = ydoc.getText('content')
+    const observer = (_: unknown, transaction: any) => {
+      if (transaction.local) handleLocalEdit()
+    }
+    ytext.observe(observer)
+    return () => ytext.unobserve(observer)
+  }, [ydoc, handleLocalEdit])
+
+  // Clean up timers and stop-typing signal when unmounting.
+  useEffect(() => {
+    return () => {
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      if (isTypingRef.current) socketRef.current?.sendTyping(false)
+    }
+  }, [])
+
   const handleChange = useCallback(
     (value: string | undefined) => {
       if (ydoc) return
       if (isRemoteUpdate.current) return
       updateDocContent(value ?? '')
+      handleLocalEdit()
     },
-    [ydoc, updateDocContent]
+    [ydoc, updateDocContent, handleLocalEdit]
   )
 
   const handleQuote = () => {

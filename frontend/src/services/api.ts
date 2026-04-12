@@ -39,6 +39,8 @@ export const projectsApi = {
     api.patch(`/projects/${projectId}/members/${userId}`, { role }),
   removeMember: (projectId: string, userId: string) =>
     api.delete(`/projects/${projectId}/members/${userId}`),
+  addMember: (projectId: string, usernameOrEmail: string, role: string) =>
+    api.post(`/projects/${projectId}/members`, { username_or_email: usernameOrEmail, role }),
   listInvites: (id: string) => api.get(`/projects/${id}/invites`),
   createInvite: (id: string, role: string, label: string) =>
     api.post(`/projects/${id}/invites`, { role, label }),
@@ -102,19 +104,29 @@ export const aiChatApi = {
 }
 
 // Parse streamed `data:` frames so chat UIs can render long responses incrementally.
+// Pass an AbortController signal to allow the caller to cancel mid-stream.
 export async function streamAI(
   endpoint: string,
   body: Record<string, unknown>,
   onChunk: (chunk: string) => void,
   onDone: () => void,
-  onError: (err: string) => void
+  onError: (err: string) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const res = await fetch(`/api${endpoint}`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+  let res: Response
+  try {
+    res = await fetch(`/api${endpoint}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    })
+  } catch (err: any) {
+    if (err?.name === 'AbortError') { onDone(); return }
+    onError(`Request failed: ${err?.message ?? 'network error'}`)
+    return
+  }
 
   if (!res.ok) {
     onError(`Request failed: ${res.status}`)
@@ -125,19 +137,25 @@ export async function streamAI(
   const decoder = new TextDecoder()
   let buffer = ''
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = line.slice(6)
-        if (data === '[DONE]') { onDone(); return }
-        onChunk(data)
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6)
+          if (data === '[DONE]') { onDone(); return }
+          onChunk(data)
+        }
       }
     }
+  } catch (err: any) {
+    if (err?.name === 'AbortError') { onDone(); return }
+    onError(`Stream interrupted: ${err?.message ?? 'unknown error'}`)
+    return
   }
   onDone()
 }

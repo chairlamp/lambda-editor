@@ -8,34 +8,9 @@ from typing import Any, Optional
 import httpx
 
 from app.config import settings
+from app.services.prompts import AGENT_SYSTEM_PROMPT, RESEARCH_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
-
-AGENT_SYSTEM_PROMPT = """You are Lambda's AI research assistant inside a collaborative LaTeX editor.
-
-You are no longer limited to plain text generation. You can use tools when they improve accuracy.
-
-Use tools in these cases:
-- Use web search for fresh facts, current references, or anything likely to have changed.
-- Use research_topic for deeper research synthesis, especially for LaTeX, academic, technical, or documentation questions.
-- Use translate_text when the user asks for translation or when preserving LaTeX commands exactly matters.
-
-Rules:
-- Prefer tool use over guessing whenever correctness matters.
-- When translating, preserve LaTeX commands, environments, citations, labels, refs, and math exactly.
-- Keep responses concise but useful.
-- If sources were used, rely on them rather than unsupported claims.
-"""
-
-RESEARCH_SYSTEM_PROMPT = """You are a focused research tool.
-
-Produce a concise research brief with:
-- a short answer
-- 2 to 5 key points
-- source-backed claims only
-
-Prefer primary or authoritative sources. For LaTeX/documentation topics, prefer Overleaf, CTAN, LaTeX Project, TeX FAQ, and TUG.
-"""
 
 LANGUAGE_CODE_MAP = {
     "arabic": "ar",

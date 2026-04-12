@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Bot, Loader2, RefreshCw, AlignLeft,
   X, FileText, MapPin,
-  ArrowRight,
+  ArrowRight, Square,
 } from 'lucide-react'
 import { aiChatApi, streamAI } from '../services/api'
 import api from '../services/api'
@@ -48,6 +48,8 @@ export default function AIChat({
   // Track server action IDs separately so streamed updates can resume the right message.
   const streamingMsgRef = useRef(new Map<string, string>())
   const actionRequestRef = useRef(new Map<string, ActionRequest>())
+  // AbortController for the active SSE stream so the user can stop generation.
+  const abortControllerRef = useRef<AbortController | null>(null)
   const { currentDoc, updateDocContent, user } = useStore()
   const effectiveEquationLocation = equationLocation ?? pendingEquationLocation ?? null
   const canReviewDiffs = !readOnly
@@ -253,20 +255,25 @@ export default function AIChat({
     )
   }
 
+  const stopGeneration = () => {
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+  }
+
   // Share chunks as they arrive so collaborators do not wait for the final response.
   const runStream = async (
     endpoint: string,
     payload: Record<string, unknown>,
     aid: string,
   ) => {
+    const controller = new AbortController()
+    abortControllerRef.current = controller
     const responseId = `${aid}-res`
     let started = false
-    let fullContent = ''
     await streamAI(
       endpoint,
       payload,
       (chunk) => {
-        fullContent += chunk
         if (!started) {
           started = true
           startStreamingMsg(responseId, chunk)
@@ -276,17 +283,19 @@ export default function AIChat({
         broadcast({ event: 'chunk', content: chunk, action_id: aid })
       },
       () => {
+        abortControllerRef.current = null
         finalizeMsg(responseId)
         broadcast({ event: 'done', action_id: aid })
       },
       (err) => {
+        abortControllerRef.current = null
         const errorChunk = `**Error:** ${err}`
-        fullContent += errorChunk
-        if (!started) startStreamingMsg(responseId, `**Error:** ${err}`)
+        if (!started) startStreamingMsg(responseId, errorChunk)
         else appendChunk(responseId, errorChunk)
         finalizeMsg(responseId)
         broadcast({ event: 'done', action_id: aid })
       },
+      controller.signal,
     )
   }
 
@@ -574,6 +583,20 @@ export default function AIChat({
           <span style={{ fontWeight: 700, fontSize: 13, color: '#c7d2fe' }}>AI Assistant</span>
           {loading && <Loader2 size={12} color="#818cf8" style={{ animation: 'spin 1s linear infinite', marginLeft: 4 }} />}
           <div style={{ flex: 1 }} />
+          {loading && (
+            <button
+              onClick={stopGeneration}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                background: '#7f1d1d40', border: '1px solid #7f1d1d',
+                borderRadius: 5, color: '#f87171', fontSize: 11,
+                padding: '3px 8px', cursor: 'pointer',
+              }}
+              title="Stop generation"
+            >
+              <Square size={10} fill="#f87171" /> Stop
+            </button>
+          )}
           {onClose && (
             <button onClick={onClose} style={closeBtnStyle} title="Close"><X size={12} /></button>
           )}

@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { docsApi } from '../services/api'
 import { ProjectSocket } from '../services/socket'
 import { Document, useStore } from '../store/useStore'
+import { C } from '../design'
 
 interface Props {
   projectId?: string
@@ -25,7 +26,9 @@ interface TreeNode {
 }
 
 function fileIcon(doc: Document) {
-  return doc.kind === 'uploaded' ? <FileImage size={13} /> : <FileCode2 size={13} />
+  return doc.kind === 'uploaded'
+    ? <FileImage size={12} color={C.textMuted} />
+    : <FileCode2 size={12} color={C.textMuted} />
 }
 
 function buildTree(documents: Document[], folders: FolderItem[]): TreeNode[] {
@@ -230,10 +233,7 @@ export default function FileTree({ projectId }: Props) {
         <div key={node.path}>
           <div
             onClick={() => setExpanded((prev) => ({ ...prev, [node.path]: !isOpen }))}
-            onDragOver={(e) => {
-              e.preventDefault()
-              setDragOverPath(node.path)
-            }}
+            onDragOver={(e) => { e.preventDefault(); setDragOverPath(node.path) }}
             onDragLeave={() => setDragOverPath((current) => current === node.path ? null : current)}
             onDrop={async (e) => {
               e.preventDefault()
@@ -243,14 +243,18 @@ export default function FileTree({ projectId }: Props) {
               if (doc) await moveDocToFolder(doc, node.path)
             }}
             style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: `6px 12px 6px ${12 + depth * 14}px`,
-              color: '#cbd5e1', cursor: 'pointer', fontSize: 12,
-              background: dragOverPath === node.path ? '#1f2937' : 'transparent',
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: `5px 10px 5px ${10 + depth * 13}px`,
+              color: C.textSecondary, cursor: 'pointer', fontSize: 12,
+              background: dragOverPath === node.path ? C.bgActive : 'transparent',
+              borderRadius: 5, margin: '1px 4px',
             }}
           >
-            {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            <FolderIcon size={13} color="#fbbf24" />
-            <span>{node.name}</span>
+            <span style={{ color: C.textMuted, flexShrink: 0 }}>
+              {isOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            </span>
+            <FolderIcon size={12} color={C.yellow} style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
           </div>
           {isOpen && node.children?.map((child) => renderNode(child, depth + 1))}
         </div>
@@ -258,6 +262,7 @@ export default function FileTree({ projectId }: Props) {
     }
 
     const doc = node.doc!
+    const isActive = docId === doc.id
     return (
       <div
         key={doc.id}
@@ -268,15 +273,19 @@ export default function FileTree({ projectId }: Props) {
           e.dataTransfer.effectAllowed = 'move'
         }}
         style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: `6px 12px 6px ${26 + depth * 14}px`,
-          color: docId === doc.id ? '#c7d2fe' : '#9ca3af',
-          background: docId === doc.id ? '#1e1e3a' : 'transparent',
-          borderLeft: docId === doc.id ? '2px solid #4f46e5' : '2px solid transparent',
+          display: 'flex', alignItems: 'center', gap: 5,
+          padding: `5px 10px 5px ${22 + depth * 13}px`,
+          color: isActive ? C.textPrimary : C.textSecondary,
+          background: isActive ? C.bgActive : 'transparent',
+          borderLeft: `2px solid ${isActive ? C.accent : 'transparent'}`,
           cursor: 'pointer', fontSize: 12,
+          borderRadius: '0 5px 5px 0', margin: '1px 0',
+          transition: 'background 0.1s',
         }}
+        onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = C.bgHover }}
+        onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
       >
-        {fileIcon(doc)}
+        <span style={{ flexShrink: 0 }}>{fileIcon(doc)}</span>
         {renamingDocId === doc.id ? (
           <input
             ref={renameInputRef}
@@ -290,15 +299,9 @@ export default function FileTree({ projectId }: Props) {
               if (e.key === 'Escape') setRenamingDocId(null)
             }}
             style={{
-              flex: 1,
-              background: '#0f0f23',
-              border: '1px solid #4f46e5',
-              borderRadius: 3,
-              padding: '1px 5px',
-              color: '#e2e8f0',
-              fontSize: 12,
-              outline: 'none',
-              minWidth: 0,
+              flex: 1, background: C.bgBase,
+              border: `1px solid ${C.accent}`, borderRadius: 3,
+              padding: '1px 5px', color: C.textPrimary, fontSize: 12, outline: 'none', minWidth: 0,
             }}
           />
         ) : (
@@ -309,74 +312,82 @@ export default function FileTree({ projectId }: Props) {
             {node.name}
           </span>
         )}
-        <button onClick={(e) => deleteDoc(e, doc.id)} style={{ background: 'none', border: 'none', color: '#4a4a6a', cursor: 'pointer', padding: 2 }}>
-          <Trash2 size={11} />
+        <button
+          onClick={(e) => deleteDoc(e, doc.id)}
+          style={{
+            background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer',
+            padding: 2, display: 'flex', alignItems: 'center', flexShrink: 0, opacity: 0,
+          }}
+          className="delete-btn"
+        >
+          <Trash2 size={10} />
         </button>
       </div>
     )
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0f0f23' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: C.bgSurface }}>
+      <style>{`
+        div:hover .delete-btn { opacity: 1 !important; }
+      `}</style>
+
       <div style={{
-        padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        borderBottom: '1px solid #1e1e3a',
+        padding: '8px 10px 8px 12px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        borderBottom: `1px solid ${C.borderFaint}`,
+        flexShrink: 0,
       }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', letterSpacing: 0.5, textTransform: 'uppercase' }}>
+        <span style={{ fontSize: 10.5, fontWeight: 600, color: C.textMuted, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
           Files
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button onClick={() => setCreatingFolder((v) => !v)} title="New folder" style={buttonStyle('#fbbf24')}>
-            <FolderPlus size={14} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <button onClick={() => setCreatingFolder((v) => !v)} title="New folder" style={actionBtn}>
+            <FolderPlus size={13} />
           </button>
-          <button onClick={() => setCreatingFile((v) => !v)} title="New file" style={buttonStyle('#818cf8')}>
-            <Plus size={14} />
+          <button onClick={() => setCreatingFile((v) => !v)} title="New file" style={actionBtn}>
+            <Plus size={13} />
           </button>
-          <button onClick={() => fileInputRef.current?.click()} title="Upload files" style={buttonStyle('#38bdf8')}>
-            {uploading ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Upload size={14} />}
+          <button onClick={() => fileInputRef.current?.click()} title="Upload files" style={actionBtn}>
+            {uploading ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Upload size={13} />}
           </button>
         </div>
         <input ref={fileInputRef} type="file" multiple onChange={(e) => void uploadFiles(e.target.files)} style={{ display: 'none' }} />
       </div>
 
       {creatingFile && (
-        <div style={{ padding: 10, borderBottom: '1px solid #1e1e3a' }}>
+        <div style={{ padding: '8px 10px', borderBottom: `1px solid ${C.borderFaint}` }}>
           <input
-            autoFocus
-            value={newPath}
+            autoFocus value={newPath}
             onChange={(e) => setNewPath(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void createFile()
               if (e.key === 'Escape') setCreatingFile(false)
             }}
-            placeholder="src/app.py or notes/todo.md"
-            style={inputStyle}
+            placeholder="filename.tex"
+            style={inputSt}
           />
         </div>
       )}
 
       {creatingFolder && (
-        <div style={{ padding: 10, borderBottom: '1px solid #1e1e3a' }}>
+        <div style={{ padding: '8px 10px', borderBottom: `1px solid ${C.borderFaint}` }}>
           <input
-            autoFocus
-            value={newFolderPath}
+            autoFocus value={newFolderPath}
             onChange={(e) => setNewFolderPath(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void createFolder()
               if (e.key === 'Escape') setCreatingFolder(false)
             }}
-            placeholder="assets/images"
-            style={inputStyle}
+            placeholder="sections/intro"
+            style={inputSt}
           />
         </div>
       )}
 
       <div
-        style={{ flex: 1, overflow: 'auto', background: dragOverPath === '' ? '#111827' : 'transparent' }}
-        onDragOver={(e) => {
-          e.preventDefault()
-          setDragOverPath('')
-        }}
+        style={{ flex: 1, overflow: 'auto', paddingTop: 4, background: dragOverPath === '' ? C.bgHover : 'transparent' }}
+        onDragOver={(e) => { e.preventDefault(); setDragOverPath('') }}
         onDragLeave={(e) => {
           if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
           setDragOverPath((current) => current === '' ? null : current)
@@ -390,35 +401,30 @@ export default function FileTree({ projectId }: Props) {
         }}
       >
         {loading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 20 }}>
-            <Loader2 size={16} color="#6b7280" style={{ animation: 'spin 1s linear infinite' }} />
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
+            <Loader2 size={14} color={C.textMuted} style={{ animation: 'spin 1s linear infinite' }} />
           </div>
         ) : nodes.length === 0 ? (
-          <div style={{ padding: 16, color: '#4a4a6a', fontSize: 12, textAlign: 'center' }}>
-            No files.
+          <div style={{ padding: '20px 12px', color: C.textMuted, fontSize: 12, textAlign: 'center' }}>
+            No files yet
           </div>
         ) : (
           nodes.map((node) => renderNode(node))
         )}
       </div>
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
 
-function buttonStyle(color: string): React.CSSProperties {
-  return { background: 'none', border: 'none', color, cursor: 'pointer', padding: 2 }
+const actionBtn: React.CSSProperties = {
+  background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer',
+  padding: 4, display: 'flex', alignItems: 'center', borderRadius: 4,
+  transition: 'color 0.12s',
 }
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  background: '#1e1e3a',
-  border: '1px solid #4f46e5',
-  borderRadius: 4,
-  padding: '6px 8px',
-  color: '#e2e8f0',
-  fontSize: 12,
-  outline: 'none',
+const inputSt: React.CSSProperties = {
+  width: '100%', background: C.bgBase,
+  border: `1px solid ${C.border}`, borderRadius: 5,
+  padding: '5px 8px', color: C.textPrimary, fontSize: 12, outline: 'none',
   boxSizing: 'border-box',
 }

@@ -137,6 +137,18 @@ async def handle_room(
                     exclude=user_id,
                 )
 
+            elif msg_type == "typing":
+                if not read_only:
+                    await room.broadcast(
+                        {
+                            "type": "typing",
+                            "user_id": user_id,
+                            "username": username,
+                            "is_typing": bool(msg.get("is_typing", True)),
+                        },
+                        exclude=user_id,
+                    )
+
             elif msg_type == "ping":
                 await room.send_to(user_id, {"type": "pong"})
 

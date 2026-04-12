@@ -85,6 +85,10 @@ export class RoomSocket {
     this.send({ type: 'ai_chat', ...data })
   }
 
+  sendTyping(isTyping: boolean) {
+    this.send({ type: 'typing', is_typing: isTyping })
+  }
+
   sendCompileResult(data: { success: boolean; pdf_base64: string | null; log: string }) {
     this.send({ type: 'compile_result', ...data })
   }

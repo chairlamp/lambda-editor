@@ -6,3 +6,6 @@ backend/venv/
 frontend/dist
 __pycache__/
 *.pyc
+.DS_Store
+*.pdf
+*.docx

@@ -1,7 +1,9 @@
 import { useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Loader2 } from 'lucide-react'
 import { authApi } from '../services/api'
 import { useStore } from '../store/useStore'
+import { C } from '../design'
 
 export default function LoginPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login')
@@ -24,8 +26,7 @@ export default function LoginPage() {
       } else {
         res = await authApi.login(email, password)
       }
-      const { user } = res.data
-      setUser(user, 'session')
+      setUser(res.data.user, 'session')
       navigate('/projects')
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'Something went wrong')
@@ -37,85 +38,111 @@ export default function LoginPage() {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      height: '100vh', background: '#0f0f23',
+      minHeight: '100vh', background: C.bgBase,
+      backgroundImage: 'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(124,106,246,0.07), transparent)',
     }}>
-      <div style={{
-        background: '#16213e', borderRadius: 12, padding: 36,
-        width: 380, border: '1px solid #1e1e3a',
-      }}>
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{ fontSize: 32, fontWeight: 800, color: '#818cf8' }}>λ Editor</div>
-          <p style={{ color: '#6b7280', fontSize: 13, marginTop: 4 }}>
-            Collaborative LaTeX Editor with AI
+      <div style={{ width: 400, animation: 'fadeIn 0.3s ease' }}>
+        {/* Brand mark */}
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 52, height: 52, borderRadius: 14, marginBottom: 14,
+            background: 'linear-gradient(135deg, rgba(124,106,246,0.2), rgba(157,123,232,0.08))',
+            border: '1px solid rgba(124,106,246,0.2)',
+            fontSize: 26, fontWeight: 700, color: C.lambda,
+          }}>
+            λ
+          </div>
+          <h1 style={{ fontSize: 20, fontWeight: 600, color: C.textPrimary, letterSpacing: '-0.025em' }}>
+            Lambda Editor
+          </h1>
+          <p style={{ color: C.textMuted, fontSize: 13, marginTop: 4 }}>
+            Collaborative LaTeX with AI
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 4, marginBottom: 20, background: '#0f0f23', borderRadius: 6, padding: 4 }}>
-          {(['login', 'register'] as const).map((m) => (
-            <button key={m} onClick={() => { setMode(m); setError('') }} style={{
-              flex: 1, padding: '6px 0', borderRadius: 4, border: 'none',
-              background: mode === m ? '#4f46e5' : 'transparent',
-              color: mode === m ? '#fff' : '#9ca3af',
-              cursor: 'pointer', fontSize: 13, fontWeight: 600,
-            }}>
-              {m === 'login' ? 'Sign In' : 'Register'}
-            </button>
-          ))}
-        </div>
-
-        <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <label style={labelStyle}>Email</label>
-            <input
-              type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-              required style={inputStyle} placeholder="you@example.com"
-            />
-          </div>
-
-          {mode === 'register' && (
-            <div>
-              <label style={labelStyle}>Username</label>
-              <input
-                value={username} onChange={(e) => setUsername(e.target.value)}
-                required style={inputStyle} placeholder="username"
-              />
-            </div>
-          )}
-
-          <div>
-            <label style={labelStyle}>Password</label>
-            <input
-              type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              required style={inputStyle} placeholder="••••••••"
-            />
-          </div>
-
-          {error && (
-            <div style={{ background: '#2d1b1b', border: '1px solid #7f1d1d', borderRadius: 6, padding: '8px 12px', color: '#fca5a5', fontSize: 13 }}>
-              {error}
-            </div>
-          )}
-
-          <button type="submit" disabled={loading} style={{
-            padding: '10px', borderRadius: 6, border: 'none',
-            background: loading ? '#3a3a6a' : '#4f46e5',
-            color: '#fff', fontSize: 14, fontWeight: 600,
-            cursor: loading ? 'not-allowed' : 'pointer', marginTop: 4,
+        {/* Auth card */}
+        <div style={{
+          background: C.bgCard,
+          border: `1px solid ${C.border}`,
+          borderRadius: 14,
+          padding: '26px 26px 22px',
+          boxShadow: '0 24px 64px rgba(0,0,0,0.45)',
+        }}>
+          {/* Tab switcher */}
+          <div style={{
+            display: 'flex', gap: 2, marginBottom: 22,
+            background: C.bgBase, borderRadius: 8, padding: 3,
           }}>
-            {loading ? 'Please wait…' : mode === 'login' ? 'Sign In' : 'Create Account'}
-          </button>
-        </form>
+            {(['login', 'register'] as const).map((m) => (
+              <button key={m} onClick={() => { setMode(m); setError('') }} style={{
+                flex: 1, padding: '7px 0', borderRadius: 6, border: 'none',
+                background: mode === m ? C.bgRaised : 'transparent',
+                color: mode === m ? C.textPrimary : C.textMuted,
+                cursor: 'pointer', fontSize: 13, fontWeight: mode === m ? 500 : 400,
+                transition: 'all 0.15s',
+                boxShadow: mode === m ? '0 1px 4px rgba(0,0,0,0.35)' : 'none',
+                fontFamily: 'inherit',
+              }}>
+                {m === 'login' ? 'Sign in' : 'Create account'}
+              </button>
+            ))}
+          </div>
+
+          <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <label style={labelSt}>Email</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                required style={inputSt} placeholder="you@university.edu" />
+            </div>
+
+            {mode === 'register' && (
+              <div>
+                <label style={labelSt}>Username</label>
+                <input value={username} onChange={(e) => setUsername(e.target.value)}
+                  required style={inputSt} placeholder="username" />
+              </div>
+            )}
+
+            <div>
+              <label style={labelSt}>Password</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                required style={inputSt} placeholder="••••••••" />
+            </div>
+
+            {error && (
+              <div style={{
+                background: C.redSubtle, border: `1px solid rgba(248,113,113,0.2)`,
+                borderRadius: 7, padding: '9px 12px', color: C.red, fontSize: 12.5, lineHeight: 1.45,
+              }}>
+                {error}
+              </div>
+            )}
+
+            <button type="submit" disabled={loading} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+              padding: '10px', borderRadius: 8, border: 'none', marginTop: 2,
+              background: loading ? 'rgba(124,106,246,0.5)' : C.accent,
+              color: '#fff', fontSize: 13, fontWeight: 500,
+              cursor: loading ? 'not-allowed' : 'pointer',
+              transition: 'background 0.15s', fontFamily: 'inherit',
+            }}>
+              {loading && <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />}
+              {loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   )
 }
 
-const labelStyle: React.CSSProperties = {
-  display: 'block', fontSize: 12, color: '#9ca3af', marginBottom: 4, fontWeight: 600,
+const labelSt: React.CSSProperties = {
+  display: 'block', fontSize: 12, color: '#5e5e72', marginBottom: 5, fontWeight: 500,
 }
-
-const inputStyle: React.CSSProperties = {
-  width: '100%', background: '#0f0f23', border: '1px solid #2a2a4a',
-  borderRadius: 6, padding: '8px 12px', color: '#e2e8f0', fontSize: 14,
-  outline: 'none', boxSizing: 'border-box',
+const inputSt: React.CSSProperties = {
+  width: '100%', background: 'rgba(255,255,255,0.025)',
+  border: '1px solid rgba(255,255,255,0.07)',
+  borderRadius: 7, padding: '9px 12px', color: '#ececf1', fontSize: 13,
+  outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit',
 }
