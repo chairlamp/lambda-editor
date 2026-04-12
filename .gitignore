@@ -6,3 +6,4 @@ backend/venv/
 frontend/dist
 __pycache__/
 *.pyc
+.vercel

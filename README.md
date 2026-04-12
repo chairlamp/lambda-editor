@@ -161,6 +161,28 @@ CORS_ORIGINS=https://your-frontend.vercel.app
 
 `frontend/vercel.json` includes a SPA rewrite so deep links such as `/projects/:projectId/docs/:docId` resolve to the React app correctly.
 
+## Render Backend Deployment
+
+`render.yaml` provisions a free Render web service for the backend, a free Postgres database, and a free Key Value instance for collaboration state.
+
+If you use the Blueprint:
+
+1. In Render, create a new Blueprint from this repository
+2. Provide `CORS_ORIGINS` during setup, for example:
+
+```env
+CORS_ORIGINS=https://lambdav2.vercel.app
+```
+
+3. Optionally provide:
+
+```env
+OPENAI_API_KEY=sk-...
+GOOGLE_TRANSLATE_API_KEY=...
+```
+
+The backend now accepts Render's plain Postgres connection string format (`postgresql://...`) and automatically upgrades it to the async SQLAlchemy driver URL internally, so you can use Render's injected `connectionString` directly as `DATABASE_URL`.
+
 ## Implementation Notes
 
 ### How Y.js integrates with the backend
