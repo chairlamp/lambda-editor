@@ -16,12 +16,8 @@ from httpx import ASGITransport, AsyncClient
 
 import app.redis_client as redis_module
 
-_fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-redis_module.redis_client = _fake
-
 # Re-bind references that imported redis_client at module load.
 import app.api.auth as auth_module
-auth_module.redis_client = _fake
 
 from app.database import Base, engine
 from fastapi import FastAPI
@@ -36,11 +32,17 @@ app.include_router(versions.router)
 
 @pytest_asyncio.fixture(autouse=True)
 async def _reset_db():
+    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    redis_module.redis_client = fake
+    auth_module.redis_client = fake
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-    await _fake.flushall()
+
+    await fake.flushall()
     yield
+    await fake.aclose()
 
 
 @pytest_asyncio.fixture
