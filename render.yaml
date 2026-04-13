@@ -1,15 +1,12 @@
 services:
   - type: web
-    runtime: python
+    runtime: docker
     name: lambda-backend
-    rootDir: backend
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
     healthCheckPath: /health
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.13
       - key: SECRET_KEY
         generateValue: true
       - key: DATABASE_URL
