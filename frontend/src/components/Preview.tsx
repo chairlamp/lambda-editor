@@ -214,24 +214,36 @@ export default function Preview({ onClose, socket }: Props) {
           <div style={{
             height: '100%',
             overflow: 'hidden',
+            position: 'relative',
             borderRadius: 12,
             border: `1px solid ${C.border}`,
             background: '#fff',
             boxShadow: '0 18px 42px rgba(15,23,42,0.12)',
           }}>
-            {/* The built-in browser PDF viewer uses the opaque data/blob URL as its title.
-                Crop that chrome and rely on the app toolbar for actions instead. */}
             <iframe
               src={pdfEmbedUrl}
               style={{
                 width: '100%',
-                height: 'calc(100% + 42px)',
-                marginTop: -42,
+                height: '100%',
                 border: 'none',
                 background: '#fff',
                 display: 'block',
               }}
               title="PDF Preview"
+            />
+            {/* Mask the noisy generated filename while preserving the viewer toolbar controls. */}
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: 360,
+                maxWidth: '48%',
+                height: 36,
+                background: '#3c4043',
+                borderTopLeftRadius: 12,
+                pointerEvents: 'none',
+              }}
             />
           </div>
         ) : (
