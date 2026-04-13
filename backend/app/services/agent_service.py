@@ -49,6 +49,32 @@ def _build_user_input(prompt: str, document_context: str = "") -> list[dict[str,
     }]
 
 
+def _search_tool_type() -> str:
+    return "browser_search" if settings.llm_provider == "groq" else "web_search"
+
+
+def _function_tool(
+    name: str,
+    description: str,
+    parameters: dict[str, Any],
+) -> dict[str, Any]:
+    if settings.llm_provider == "groq":
+        return {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": parameters,
+            },
+        }
+    return {
+        "type": "function",
+        "name": name,
+        "description": description,
+        "parameters": parameters,
+    }
+
+
 def _normalize_sources(raw_sources: list[dict[str, Any]]) -> list[dict[str, str]]:
     seen: set[str] = set()
     sources: list[dict[str, str]] = []
@@ -75,8 +101,10 @@ def _extract_text_and_sources(response_json: dict[str, Any]) -> tuple[str, list[
             name = item.get("name")
             if isinstance(name, str) and name not in tools_used:
                 tools_used.append(name)
-        elif item_type == "web_search_call" and "web_search" not in tools_used:
-            tools_used.append("web_search")
+        elif item_type in {"web_search_call", "browser_search_call"}:
+            tool_name = "browser_search" if item_type == "browser_search_call" else "web_search"
+            if tool_name not in tools_used:
+                tools_used.append(tool_name)
 
         for part in item.get("content", []) or []:
             part_type = part.get("type")
@@ -210,7 +238,7 @@ async def _research_topic(query: str, focus: str = "") -> dict[str, Any]:
             "role": "user",
             "content": [{"type": "input_text", "text": research_prompt}],
         }],
-        "tools": [{"type": "web_search"}],
+        "tools": [{"type": _search_tool_type()}],
     })
     content, sources, _ = _extract_text_and_sources(response_json)
     logger.info("agent tool result: research_topic sources=%d chars=%d", len(sources), len(content))
@@ -340,13 +368,15 @@ async def run_tool_enabled_chat(prompt: str, document_context: str = "") -> dict
             "tools_used": ["translate_text"],
         }
 
-    tools: list[dict[str, Any]] = [
-        {"type": "web_search"},
-        {
-            "type": "function",
-            "name": "research_topic",
-            "description": "Research a topic and return a short source-backed brief. Use this for documentation lookup, LaTeX references, academic research, or technical synthesis.",
-            "parameters": {
+    tools: list[dict[str, Any]] = []
+    if settings.llm_provider != "groq":
+        tools.append({"type": "web_search"})
+
+    tools.extend([
+        _function_tool(
+            "research_topic",
+            "Research a topic and return a short source-backed brief. Use this for documentation lookup, LaTeX references, academic research, or technical synthesis.",
+            {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "What to research."},
@@ -355,12 +385,11 @@ async def run_tool_enabled_chat(prompt: str, document_context: str = "") -> dict
                 "required": ["query"],
                 "additionalProperties": False,
             },
-        },
-        {
-            "type": "function",
-            "name": "translate_text",
-            "description": "Translate text with Google Cloud Translation while preserving LaTeX commands and formatting exactly. Use ISO language codes like es, fr, de, kk, ru, zh-CN.",
-            "parameters": {
+        ),
+        _function_tool(
+            "translate_text",
+            "Translate text with Google Cloud Translation while preserving LaTeX commands and formatting exactly. Use ISO language codes like es, fr, de, kk, ru, or zh-CN.",
+            {
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "The text to translate."},
@@ -369,8 +398,8 @@ async def run_tool_enabled_chat(prompt: str, document_context: str = "") -> dict
                 "required": ["text", "target_language"],
                 "additionalProperties": False,
             },
-        },
-    ]
+        ),
+    ])
 
     payload: dict[str, Any] = {
         "model": settings.llm_model,
