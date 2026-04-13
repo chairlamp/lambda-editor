@@ -40,8 +40,8 @@ class OpenAIProvider(LLMProvider):
     def __init__(self) -> None:
         from openai import AsyncOpenAI  # import deferred so tests can mock easily
         self._client = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL,
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
         )
 
     async def stream_completion(
@@ -50,7 +50,7 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int = 2000,
     ) -> AsyncIterator[str]:
         stream = await self._client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
+            model=settings.llm_model,
             messages=messages,
             stream=True,
             max_tokens=max_tokens,
@@ -66,7 +66,7 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int = 4000,
     ) -> str:
         response = await self._client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
+            model=settings.llm_model,
             messages=messages,
             stream=False,
             max_tokens=max_tokens,

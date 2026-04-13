@@ -157,22 +157,43 @@ def _detect_translation_request(prompt: str) -> Optional[dict[str, str]]:
 
 
 async def _responses_create(payload: dict[str, Any]) -> dict[str, Any]:
-    if not settings.OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY is not configured.")
+    if not settings.llm_api_key:
+        raise RuntimeError(f"{settings.llm_api_key_env_name} is not configured.")
 
     async with httpx.AsyncClient(timeout=90.0) as http:
         response = await http.post(
-            f"{settings.OPENAI_BASE_URL.rstrip('/')}/responses",
+            f"{settings.llm_base_url.rstrip('/')}/responses",
             headers={
-                "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                "Authorization": f"Bearer {settings.llm_api_key}",
                 "Content-Type": "application/json",
             },
             json=payload,
         )
     if response.status_code >= 400:
         detail = response.text.strip()
-        raise RuntimeError(detail or f"OpenAI request failed with status {response.status_code}.")
+        raise RuntimeError(detail or f"{settings.llm_provider.title()} request failed with status {response.status_code}.")
     return response.json()
+
+
+def _tool_outputs_follow_up_input(
+    prompt: str,
+    document_context: str,
+    tool_outputs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rendered_outputs: list[str] = []
+    for output in tool_outputs:
+        try:
+            parsed = json.loads(str(output.get("output") or "{}"))
+        except json.JSONDecodeError:
+            parsed = {"raw": output.get("output")}
+        rendered_outputs.append(json.dumps(parsed, ensure_ascii=True, indent=2))
+
+    follow_up = (
+        "Continue answering the user's request using the following tool results.\n\n"
+        f"Original request:\n{prompt.strip()}\n\n"
+        f"Tool results:\n{chr(10).join(rendered_outputs)}"
+    )
+    return _build_user_input(follow_up, document_context)
 
 
 async def _research_topic(query: str, focus: str = "") -> dict[str, Any]:
@@ -183,7 +204,7 @@ async def _research_topic(query: str, focus: str = "") -> dict[str, Any]:
     logger.info("agent tool call: research_topic query=%r focus=%r", query.strip(), focus.strip())
 
     response_json = await _responses_create({
-        "model": settings.OPENAI_MODEL,
+        "model": settings.llm_model,
         "instructions": RESEARCH_SYSTEM_PROMPT,
         "input": [{
             "role": "user",
@@ -352,7 +373,7 @@ async def run_tool_enabled_chat(prompt: str, document_context: str = "") -> dict
     ]
 
     payload: dict[str, Any] = {
-        "model": settings.OPENAI_MODEL,
+        "model": settings.llm_model,
         "instructions": AGENT_SYSTEM_PROMPT,
         "input": _build_user_input(prompt, document_context),
         "tools": tools,
@@ -405,13 +426,20 @@ async def run_tool_enabled_chat(prompt: str, document_context: str = "") -> dict
                 "output": json.dumps(result, ensure_ascii=True),
             })
 
-        response_json = await _responses_create({
-            "model": settings.OPENAI_MODEL,
-            "instructions": AGENT_SYSTEM_PROMPT,
-            "previous_response_id": response_json.get("id"),
-            "input": tool_outputs,
-            "tools": tools,
-        })
+        if settings.llm_provider == "groq":
+            response_json = await _responses_create({
+                "model": settings.llm_model,
+                "instructions": AGENT_SYSTEM_PROMPT,
+                "input": _tool_outputs_follow_up_input(prompt, document_context, tool_outputs),
+            })
+        else:
+            response_json = await _responses_create({
+                "model": settings.llm_model,
+                "instructions": AGENT_SYSTEM_PROMPT,
+                "previous_response_id": response_json.get("id"),
+                "input": tool_outputs,
+                "tools": tools,
+            })
         content, response_sources, response_tools = _extract_text_and_sources(response_json)
         sources = _normalize_sources(sources + response_sources)
         for tool_name in response_tools:
