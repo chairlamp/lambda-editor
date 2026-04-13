@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { AlertCircle, CheckCircle, ChevronDown, Download, FileText, Loader2, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertCircle, CheckCircle, ChevronDown, ChevronUp, Download, ExternalLink, FileText, Loader2, X } from 'lucide-react'
 import { compileApi } from '../services/api'
 import { RoomSocket } from '../services/socket'
 import { useStore } from '../store/useStore'
@@ -35,6 +35,15 @@ export default function Preview({ onClose, socket }: Props) {
   const { currentDoc, compiledPdf, compileLog, isCompiling, setCompiledPdf, setCompiling } = useStore()
   const [isExporting, setIsExporting] = useState(false)
   const [showExportMenu, setShowExportMenu] = useState(false)
+  const [showLog, setShowLog] = useState(false)
+
+  useEffect(() => {
+    if (!compileLog) {
+      setShowLog(false)
+      return
+    }
+    if (!compiledPdf) setShowLog(true)
+  }, [compileLog, compiledPdf])
 
   const compilePdf = async () => {
     if (!currentDoc?.content || isCompiling) return
@@ -84,9 +93,20 @@ export default function Preview({ onClose, socket }: Props) {
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 7, padding: '0 12px',
-        height: 42, background: C.bgRaised, borderBottom: `1px solid ${C.borderFaint}`,
+        height: 44, background: C.bgRaised, borderBottom: `1px solid ${C.borderFaint}`,
         flexShrink: 0,
       }}>
+        <span style={{
+          fontSize: 11.5,
+          fontWeight: 700,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+          color: C.textSecondary,
+          marginRight: 4,
+        }}>
+          Preview
+        </span>
+
         <button
           onClick={compilePdf}
           disabled={isCompiling || !currentDoc}
@@ -156,6 +176,12 @@ export default function Preview({ onClose, socket }: Props) {
 
         <div style={{ flex: 1 }} />
 
+        {pdfUrl && (
+          <button onClick={() => window.open(pdfUrl, '_blank', 'noopener,noreferrer')} style={closeBtn} title="Open PDF in new tab">
+            <ExternalLink size={12} />
+          </button>
+        )}
+
         {onClose && (
           <button onClick={onClose} style={closeBtn} title="Close preview">
             <X size={12} />
@@ -164,17 +190,29 @@ export default function Preview({ onClose, socket }: Props) {
       </div>
 
       {/* PDF viewer */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflow: 'hidden', background: C.bgSurface, padding: 12 }}>
         {pdfUrl ? (
-          <iframe
-            src={pdfUrl}
-            style={{ width: '100%', height: '100%', border: 'none', background: '#fff' }}
-            title="PDF Preview"
-          />
+          <div style={{
+            height: '100%',
+            overflow: 'hidden',
+            borderRadius: 12,
+            border: `1px solid ${C.border}`,
+            background: '#fff',
+            boxShadow: '0 18px 42px rgba(15,23,42,0.12)',
+          }}>
+            <iframe
+              src={pdfUrl}
+              style={{ width: '100%', height: '100%', border: 'none', background: '#fff' }}
+              title="PDF Preview"
+            />
+          </div>
         ) : (
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',
             justifyContent: 'center', height: '100%', gap: 10,
+            borderRadius: 12,
+            border: `1px dashed ${C.borderStrong}`,
+            background: C.bgRaised,
           }}>
             <FileText size={36} color={C.textDisabled} strokeWidth={1.2} />
             <p style={{ fontSize: 13, color: C.textSecondary, margin: 0 }}>Render PDF to preview here</p>
@@ -186,16 +224,42 @@ export default function Preview({ onClose, socket }: Props) {
       {/* Compile log */}
       {compileLog && (
         <div style={{
-          maxHeight: 140, overflow: 'auto', background: C.bgBase,
-          borderTop: `1px solid ${C.borderFaint}`, padding: '8px 12px',
+          background: C.bgBase,
+          borderTop: `1px solid ${C.borderFaint}`,
+          flexShrink: 0,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5, color: compiledPdf ? C.green : C.red, fontSize: 11.5 }}>
-            {compiledPdf ? <CheckCircle size={11} /> : <AlertCircle size={11} />}
-            <span style={{ fontWeight: 600 }}>{compiledPdf ? 'Compilation log' : 'Error log'}</span>
-          </div>
-          <pre style={{ fontSize: 10.5, color: C.textMuted, whiteSpace: 'pre-wrap', fontFamily: 'monospace', margin: 0 }}>
-            {compileLog}
-          </pre>
+          <button
+            onClick={() => setShowLog((v) => !v)}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '9px 12px',
+              border: 'none',
+              background: 'transparent',
+              color: compiledPdf ? C.green : C.red,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}>
+              {compiledPdf ? <CheckCircle size={11} /> : <AlertCircle size={11} />}
+              <span style={{ fontWeight: 600 }}>{compiledPdf ? 'Compilation log' : 'Error log'}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: C.textMuted }}>
+              <span>{showLog ? 'Hide' : 'Show'}</span>
+              {showLog ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+            </div>
+          </button>
+          {showLog && (
+            <div style={{ maxHeight: 220, overflow: 'auto', padding: '0 12px 12px' }}>
+              <pre style={{ fontSize: 10.5, color: C.textMuted, whiteSpace: 'pre-wrap', fontFamily: 'monospace', margin: 0 }}>
+                {compileLog}
+              </pre>
+            </div>
+          )}
         </div>
       )}
     </div>

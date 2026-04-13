@@ -23,6 +23,29 @@ interface RemoteCursor {
   selection?: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }
 }
 
+type LatexViewMode = 'editor' | 'split' | 'preview'
+
+const LAYOUT_KEYS = {
+  sidebarWidth: 'lambda-editor:sidebar-width',
+  previewWidth: 'lambda-editor:preview-width',
+  aiWidth: 'lambda-editor:ai-width',
+  viewMode: 'lambda-editor:view-mode',
+} as const
+
+function readStoredNumber(key: string, fallback: number) {
+  if (typeof window === 'undefined') return fallback
+  const raw = window.localStorage.getItem(key)
+  if (!raw) return fallback
+  const value = Number(raw)
+  return Number.isFinite(value) ? value : fallback
+}
+
+function readStoredViewMode(): LatexViewMode {
+  if (typeof window === 'undefined') return 'split'
+  const raw = window.localStorage.getItem(LAYOUT_KEYS.viewMode)
+  return raw === 'editor' || raw === 'split' || raw === 'preview' ? raw : 'split'
+}
+
 export default function EditorPage() {
   const { projectId, docId } = useParams<{ projectId: string; docId: string }>()
   const navigate = useNavigate()
@@ -37,12 +60,13 @@ export default function EditorPage() {
   const currentDocRef = useRef(currentDoc)
 
   const [showAI, setShowAI] = useState(true)
-  const [showPreview, setShowPreview] = useState(true)
   const [showVersionHistory, setShowVersionHistory] = useState(false)
   const [remoteDecorations, setRemoteDecorations] = useState<Map<string, RemoteCursor>>(new Map())
   const [readOnly, setReadOnly] = useState(false)
-  const [previewWidth, setPreviewWidth] = useState(380)
-  const [aiWidth, setAiWidth] = useState(320)
+  const [sidebarWidth, setSidebarWidth] = useState(() => readStoredNumber(LAYOUT_KEYS.sidebarWidth, 234))
+  const [previewWidth, setPreviewWidth] = useState(() => readStoredNumber(LAYOUT_KEYS.previewWidth, 460))
+  const [aiWidth, setAiWidth] = useState(() => readStoredNumber(LAYOUT_KEYS.aiWidth, 340))
+  const [viewMode, setViewMode] = useState<LatexViewMode>(() => readStoredViewMode())
   const [, setLocalCursorPos] = useState<{ lineNumber: number; column: number } | null>(null)
   const [quoteForChat, setQuoteForChat] = useState<{ lineStart: number; lineEnd: number; text: string } | null>(null)
   const [pickingEquationLocation, setPickingEquationLocation] = useState(false)
@@ -56,8 +80,30 @@ export default function EditorPage() {
     currentDocRef.current = currentDoc
   }, [currentDoc])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(LAYOUT_KEYS.sidebarWidth, String(sidebarWidth))
+  }, [sidebarWidth])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(LAYOUT_KEYS.previewWidth, String(previewWidth))
+  }, [previewWidth])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(LAYOUT_KEYS.aiWidth, String(aiWidth))
+  }, [aiWidth])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(LAYOUT_KEYS.viewMode, viewMode)
+  }, [viewMode])
+
   const isLatexDoc = currentDoc?.kind === 'latex'
   const isEditableDoc = currentDoc?.kind === 'latex' || currentDoc?.kind === 'text'
+  const showEditorPane = !isLatexDoc || viewMode !== 'preview'
+  const showPreviewPane = isLatexDoc && viewMode !== 'editor'
   const editorLanguage = (() => {
     const path = currentDoc?.path || currentDoc?.title || ''
     const ext = path.split('.').pop()?.toLowerCase()
@@ -263,6 +309,21 @@ export default function EditorPage() {
     document.addEventListener('mouseup', onUp)
   }, [previewWidth])
 
+  const startDragSidebar = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = sidebarWidth
+    const onMove = (ev: MouseEvent) => {
+      setSidebarWidth(Math.max(180, Math.min(360, startW + (ev.clientX - startX))))
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [sidebarWidth])
+
   const startDragAI = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     const startX = e.clientX
@@ -289,15 +350,15 @@ export default function EditorPage() {
           }
           return next
         })}
-        onTogglePreview={() => setShowPreview((v) => !v)}
         showAI={showAI}
-        showPreview={showPreview}
         showVersionHistory={showVersionHistory}
         onToggleVersionHistory={() => setShowVersionHistory((v) => !v)}
         projectId={projectId}
         readOnly={readOnly}
         isLatexDoc={isLatexDoc}
         isEditableDoc={isEditableDoc}
+        viewMode={isLatexDoc ? viewMode : undefined}
+        onChangeViewMode={isLatexDoc ? setViewMode : undefined}
       />
 
       {isEditableDoc && (!readOnly && !isConnected) && (
@@ -315,41 +376,51 @@ export default function EditorPage() {
       )}
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <div style={{ width: 234, flexShrink: 0, borderRight: `1px solid ${C.borderFaint}`, overflow: 'hidden' }}>
+        <div style={{ width: sidebarWidth, flexShrink: 0, borderRight: `1px solid ${C.borderFaint}`, overflow: 'hidden' }}>
           <FileTree projectId={projectId} />
         </div>
+        <div
+          onMouseDown={startDragSidebar}
+          style={{ width: 4, flexShrink: 0, cursor: 'col-resize', background: 'transparent' }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = C.accent)}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        />
 
-        <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
-          {isEditableDoc ? (
-            <Editor
-              ydoc={syncedYdoc}
-              socket={socketRef.current}
-              readOnly={readOnly}
-              remoteDecorations={remoteDecorations}
-              onRegisterTextInserter={(fn) => { textInserterRef.current = fn }}
-              onCursorMove={handleOwnCursorMove}
-              onSelectionQuote={(q) => setQuoteForChat(q)}
-              pickingLocation={pickingEquationLocation}
-              onLocationPicked={(loc) => { setEquationLocation(loc); setPickingEquationLocation(false) }}
-              ownUsername={user?.username}
-              ownColor={C.accent}
-              language={editorLanguage}
-            />
-          ) : (
-            <AssetViewer projectId={projectId} />
-          )}
-        </div>
+        {showEditorPane && (
+          <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+            {isEditableDoc ? (
+              <Editor
+                ydoc={syncedYdoc}
+                socket={socketRef.current}
+                readOnly={readOnly}
+                remoteDecorations={remoteDecorations}
+                onRegisterTextInserter={(fn) => { textInserterRef.current = fn }}
+                onCursorMove={handleOwnCursorMove}
+                onSelectionQuote={(q) => setQuoteForChat(q)}
+                pickingLocation={pickingEquationLocation}
+                onLocationPicked={(loc) => { setEquationLocation(loc); setPickingEquationLocation(false) }}
+                ownUsername={user?.username}
+                ownColor={C.accent}
+                language={editorLanguage}
+              />
+            ) : (
+              <AssetViewer projectId={projectId} />
+            )}
+          </div>
+        )}
 
-        {isLatexDoc && showPreview && (
+        {showPreviewPane && (
           <>
-            <div
-              onMouseDown={startDragPreview}
-              style={{ width: 4, flexShrink: 0, cursor: 'col-resize', background: 'transparent', borderLeft: `1px solid ${C.borderFaint}` }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = C.accent)}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-            />
-            <div style={{ width: previewWidth, flexShrink: 0, overflow: 'hidden' }}>
-              <Preview socket={socketRef.current} onClose={() => setShowPreview(false)} />
+            {showEditorPane && (
+              <div
+                onMouseDown={startDragPreview}
+                style={{ width: 4, flexShrink: 0, cursor: 'col-resize', background: 'transparent', borderLeft: `1px solid ${C.borderFaint}` }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = C.accent)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              />
+            )}
+            <div style={showEditorPane ? { width: previewWidth, flexShrink: 0, overflow: 'hidden' } : { flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              <Preview socket={socketRef.current} onClose={() => setViewMode('editor')} />
             </div>
           </>
         )}

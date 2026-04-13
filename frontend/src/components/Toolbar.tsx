@@ -8,15 +8,15 @@ import ThemeToggle from './ThemeToggle'
 
 interface Props {
   onToggleAI: () => void
-  onTogglePreview: () => void
   showAI: boolean
-  showPreview: boolean
   showVersionHistory: boolean
   onToggleVersionHistory: () => void
   projectId?: string
   readOnly?: boolean
   isLatexDoc?: boolean
   isEditableDoc?: boolean
+  viewMode?: 'editor' | 'split' | 'preview'
+  onChangeViewMode?: (mode: 'editor' | 'split' | 'preview') => void
 }
 
 interface Invite {
@@ -49,9 +49,10 @@ function Avatar({ p }: { p: Presence }) {
 }
 
 export default function Toolbar({
-  onToggleAI, onTogglePreview, showAI, showPreview,
+  onToggleAI, showAI,
   showVersionHistory, onToggleVersionHistory,
   projectId, readOnly, isLatexDoc = true, isEditableDoc = true,
+  viewMode, onChangeViewMode,
 }: Props) {
   const navigate = useNavigate()
   const { currentDoc, currentProject, user, isConnected, presence, logout, saveStatus, typingUsers } = useStore()
@@ -266,12 +267,46 @@ export default function Toolbar({
 
         <div style={{ flex: 1 }} />
 
-        {/* Action buttons */}
-        {isLatexDoc && !showPreview && (
-          <button onClick={onTogglePreview} style={iconBtn} title="Open PDF Preview">
-            <Eye size={14} />
-          </button>
+        {isLatexDoc && viewMode && onChangeViewMode && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 3,
+            padding: 3,
+            borderRadius: 9,
+            border: `1px solid ${C.border}`,
+            background: C.bgBase,
+          }}>
+            {([
+              ['editor', 'Code'],
+              ['split', 'Split'],
+              ['preview', 'Preview'],
+            ] as const).map(([mode, label]) => {
+              const active = viewMode === mode
+              return (
+                <button
+                  key={mode}
+                  onClick={() => onChangeViewMode(mode)}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: 7,
+                    border: 'none',
+                    background: active ? C.accentSubtle : 'transparent',
+                    color: active ? C.accent : C.textSecondary,
+                    fontSize: 11.5,
+                    fontWeight: active ? 600 : 500,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
         )}
+
+        {/* Action buttons */}
         {isLatexDoc && !showAI && (
           <button onClick={onToggleAI} style={iconBtn} title="Open AI Assistant">
             <Bot size={14} />
@@ -326,7 +361,7 @@ export default function Toolbar({
           }}>
             {user?.username?.[0]?.toUpperCase() || '?'}
           </div>
-          <button onClick={logout} style={{
+          <button onClick={signOut} style={{
             background: 'none', border: 'none', color: C.textMuted, fontSize: 11.5, cursor: 'pointer', fontFamily: 'inherit',
           }}>
             Sign out
