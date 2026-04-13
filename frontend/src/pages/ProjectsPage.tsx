@@ -39,8 +39,12 @@ export default function ProjectsPage() {
   const deleteProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     if (!confirm('Delete this project and all its documents?')) return
-    await projectsApi.delete(id)
-    setProjects(projects.filter((p) => p.id !== id))
+    try {
+      await projectsApi.delete(id)
+      setProjects(projects.filter((p) => p.id !== id))
+    } catch {
+      setError('Failed to delete project')
+    }
   }
 
   const joinProject = async () => {
