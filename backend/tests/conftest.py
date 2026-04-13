@@ -4,6 +4,7 @@ from pathlib import Path
 
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["REDIS_URL"] = "redis://localhost:6379/0"
+os.environ["LLM_PROVIDER"] = "openai"
 os.environ["OPENAI_API_KEY"] = "test"
 os.environ["SECRET_KEY"] = "test"
 

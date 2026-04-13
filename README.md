@@ -33,7 +33,7 @@ This is Lambda. My team's project for AI1220: a remake of Overleaf with AI featu
 | --- | --- |
 | Frontend | React 18, TypeScript, Vite, Zustand, Monaco Editor |
 | Backend | FastAPI, SQLAlchemy async, PostgreSQL, WebSockets |
-| AI | OpenAI Responses API for tool-enabled chat, OpenAI streaming for rewrite/generation actions, Google Cloud Translation API for translation tool calls |
+| AI | Configurable OpenAI-compatible provider (`OpenAI` or `Groq`) for chat/generation, plus Google Cloud Translation API for translation tool calls |
 | Auth | JWT access/refresh tokens delivered via HTTP-only cookies, with Redis-backed refresh-token rotation |
 | Collaboration | Yjs CRDT (`pycrdt` on server, `y-websocket` + `y-monaco` on client), Redis-backed CRDT state/pub-sub, Redis pub/sub for presence and project events |
 | Output | Rendered export to `PDF`, `DVI`, and `PS` via `pdflatex`, `xelatex`, `lualatex`, or `tectonic` |
@@ -49,11 +49,11 @@ Before starting the app, make sure you have:
 - `Node.js` 18+ and `npm`
 - `Docker` for the default local PostgreSQL and Redis setup used by `start.sh`
 - A LaTeX compiler such as `pdflatex`, `xelatex`, `lualatex`, or `tectonic`
-- An OpenAI API key if you want AI features enabled
+- An OpenAI or Groq API key if you want AI features enabled
 - A Google Cloud Translation API key if you want the translation tool enabled
 
 > **Note**
-> The editor itself can run without AI, but AI endpoints require `OPENAI_API_KEY` to be configured.
+> The editor itself can run without AI, but AI endpoints require the provider-specific API key to be configured (`OPENAI_API_KEY` for `openai`, `GROQ_API_KEY` for `groq`).
 
 ### 1. Backend setup
 
@@ -77,13 +77,26 @@ REFRESH_TOKEN_COOKIE_NAME=lambda_refresh_token
 ACCESS_TOKEN_TTL_SECONDS=900
 REFRESH_TOKEN_TTL_SECONDS=604800
 AUTH_COOKIE_SECURE=false
+LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o
 OPENAI_BASE_URL=https://api.openai.com/v1
+GROQ_API_KEY=
+GROQ_MODEL=openai/gpt-oss-20b
+GROQ_BASE_URL=https://api.groq.com/openai/v1
 GOOGLE_TRANSLATE_API_URL=https://translation.googleapis.com/language/translate/v2
 GOOGLE_TRANSLATE_API_KEY=
 GOOGLE_TRANSLATE_SOURCE_LANGUAGE=auto
 CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+```
+
+To use Groq instead of OpenAI, set:
+
+```env
+LLM_PROVIDER=groq
+GROQ_API_KEY=gsk_...
+GROQ_MODEL=openai/gpt-oss-20b
+GROQ_BASE_URL=https://api.groq.com/openai/v1
 ```
 
 To create PostgreSQL table structure, apply the schema dump with:
@@ -194,7 +207,7 @@ The implementation uses two WebSocket connections per open document:
 <details>
 <summary><strong>AI model behavior</strong></summary>
 
-- Free-form chat uses a tool-enabled agent path backed by the OpenAI Responses API
+- Free-form chat uses a tool-enabled agent path backed by a configurable OpenAI-compatible Responses API provider
 - The agent can use built-in web search plus custom `research_topic` and `translate_text` tools
 - Translation tool calls are handled with Google Cloud Translation instead of the language model directly
 - LaTeX commands, environments, refs, citations, and math are masked before translation and restored afterward
