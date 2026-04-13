@@ -87,6 +87,8 @@ export default function Preview({ onClose, socket }: Props) {
   }
 
   const pdfUrl = compiledPdf ? `data:application/pdf;base64,${compiledPdf}` : null
+  const pdfEmbedUrl = pdfUrl ? `${pdfUrl}#page=1&zoom=page-width` : null
+  const previewTitle = currentDoc?.path || currentDoc?.title || 'Rendered PDF'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: C.bgBase }}>
@@ -106,6 +108,23 @@ export default function Preview({ onClose, socket }: Props) {
         }}>
           Preview
         </span>
+
+        {compiledPdf && (
+          <span style={{
+            fontSize: 11.5,
+            color: C.textMuted,
+            background: C.bgCard,
+            border: `1px solid ${C.border}`,
+            borderRadius: 999,
+            padding: '4px 8px',
+            maxWidth: 220,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {previewTitle.replace(/\.tex$/i, '.pdf')}
+          </span>
+        )}
 
         <button
           onClick={compilePdf}
@@ -191,7 +210,7 @@ export default function Preview({ onClose, socket }: Props) {
 
       {/* PDF viewer */}
       <div style={{ flex: 1, overflow: 'hidden', background: C.bgSurface, padding: 12 }}>
-        {pdfUrl ? (
+        {pdfEmbedUrl ? (
           <div style={{
             height: '100%',
             overflow: 'hidden',
@@ -200,9 +219,18 @@ export default function Preview({ onClose, socket }: Props) {
             background: '#fff',
             boxShadow: '0 18px 42px rgba(15,23,42,0.12)',
           }}>
+            {/* The built-in browser PDF viewer uses the opaque data/blob URL as its title.
+                Crop that chrome and rely on the app toolbar for actions instead. */}
             <iframe
-              src={pdfUrl}
-              style={{ width: '100%', height: '100%', border: 'none', background: '#fff' }}
+              src={pdfEmbedUrl}
+              style={{
+                width: '100%',
+                height: 'calc(100% + 42px)',
+                marginTop: -42,
+                border: 'none',
+                background: '#fff',
+                display: 'block',
+              }}
               title="PDF Preview"
             />
           </div>
