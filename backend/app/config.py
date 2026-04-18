@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me"
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/lambda_editor"
     REDIS_URL: str = "redis://localhost:6379/0"
+    USE_FAKE_REDIS: bool = False
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_COOKIE_NAME: str = "lambda_access_token"
     REFRESH_TOKEN_COOKIE_NAME: str = "lambda_refresh_token"
@@ -37,22 +38,30 @@ class Settings(BaseSettings):
     @property
     def llm_provider(self) -> str:
         provider = (self.LLM_PROVIDER or "openai").strip().lower()
-        return provider if provider in {"openai", "groq"} else "openai"
+        return provider if provider in {"openai", "groq", "fake"} else "openai"
 
     @property
     def llm_api_key(self) -> str:
+        if self.llm_provider == "fake":
+            return ""
         return self.GROQ_API_KEY if self.llm_provider == "groq" else self.OPENAI_API_KEY
 
     @property
     def llm_model(self) -> str:
+        if self.llm_provider == "fake":
+            return "fake-llm"
         return self.GROQ_MODEL if self.llm_provider == "groq" else self.OPENAI_MODEL
 
     @property
     def llm_base_url(self) -> str:
+        if self.llm_provider == "fake":
+            return ""
         return self.GROQ_BASE_URL if self.llm_provider == "groq" else self.OPENAI_BASE_URL
 
     @property
     def llm_api_key_env_name(self) -> str:
+        if self.llm_provider == "fake":
+            return "N/A"
         return "GROQ_API_KEY" if self.llm_provider == "groq" else "OPENAI_API_KEY"
 
 settings = Settings()

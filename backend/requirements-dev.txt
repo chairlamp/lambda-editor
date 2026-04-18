@@ -1,2 +1,1 @@
 -r requirements.txt
-fakeredis==2.23.2

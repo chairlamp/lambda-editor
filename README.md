@@ -147,6 +147,45 @@ This script:
 - starts Vite on port `5173`
 - prints the database, cache, app, and API docs URLs
 
+## Tests
+
+### Backend and frontend unit/integration tests
+
+```bash
+cd backend
+venv/bin/pytest -q
+
+cd ../frontend
+npm test -- --run
+```
+
+### Browser E2E tests
+
+The Playwright suite covers the full bonus-path flow from registration/login through project creation, document opening, AI suggestion generation, and AI suggestion acceptance.
+
+On first setup:
+
+```bash
+cd frontend
+npm install
+npm run e2e:install
+```
+
+To run the suite:
+
+```bash
+cd frontend
+npm run test:e2e
+```
+
+The E2E harness starts:
+
+- a local FastAPI backend on `127.0.0.1:8000`
+- a local Vite frontend on `127.0.0.1:4173`
+- SQLite storage at `/tmp/lambda_editor_e2e.db`
+- in-process fake Redis
+- a deterministic fake LLM provider so the AI diff flow is repeatable and does not require network access or external API keys
+
 ## Vercel Frontend Deployment
 
 For a split deployment, the easiest shape is:
