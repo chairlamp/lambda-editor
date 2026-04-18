@@ -177,6 +177,11 @@ export default function Toolbar({
   }
 
   const isOwner = currentProject?.my_role === 'owner'
+  const currentDocBadge = currentDoc?.kind === 'latex'
+    ? { background: C.accentSubtle, color: C.accent, border: C.accentBorder }
+    : currentDoc?.kind === 'richtext'
+      ? { background: C.greenSubtle, color: C.green, border: 'rgba(34,197,94,0.25)' }
+      : { background: C.blueSubtle, color: C.blue, border: 'rgba(96,165,250,0.25)' }
 
   return (
     <>
@@ -213,9 +218,9 @@ export default function Toolbar({
           {currentDoc && (
             <span style={{
               fontSize: 10, padding: '1px 6px', borderRadius: 999,
-              background: currentDoc.kind === 'latex' ? C.accentSubtle : C.blueSubtle,
-              color: currentDoc.kind === 'latex' ? C.accent : C.blue,
-              border: `1px solid ${currentDoc.kind === 'latex' ? C.accentBorder : 'rgba(96,165,250,0.25)'}`,
+              background: currentDocBadge.background,
+              color: currentDocBadge.color,
+              border: `1px solid ${currentDocBadge.border}`,
               textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600,
             }}>
               {currentDoc.kind}

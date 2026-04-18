@@ -4,13 +4,13 @@ This document records the material ways the final submission differs from the ea
 
 ## Current Status
 
-The earlier submission-risk items around testing depth, AI history logging, AI cancellation, stale AI suggestions, and persistence-backed save confirmation have now been implemented in the codebase. The main remaining product-level deviation is the editor model itself: the application is intentionally LaTeX/Monaco-first rather than a WYSIWYG rich-text editor.
+The earlier submission-risk items around testing depth, AI history logging, AI cancellation, stale AI suggestions, persistence-backed save confirmation, and the rich-text baseline gap have now been implemented in the codebase. The remaining product-level differences are architectural emphasis and workflow choices, not missing baseline coverage.
 
 ## Summary Table
 
 | Area | Final implementation | Type | Impact |
 | --- | --- | --- | --- |
-| Editor model | Monaco + Yjs + path-based LaTeX/text files, not a rich-text document editor | Deliberate architecture deviation | Main rubric-fit risk |
+| Editor model | Monaco + Yjs for LaTeX/text files plus TipTap rich-text documents for baseline formatting workflows | Architecture expansion | Baseline covered; product still LaTeX-first |
 | Authentication | JWT access/refresh cookies with Redis-backed refresh rotation | Change from A1 design | Improvement, must be reported clearly |
 | Sharing | Direct add by username/email plus invite links with revocation | Expansion over earlier scope | Improvement |
 | AI architecture | Central prompt module, swappable provider layer, audit trail, cancellation, stale-diff safety | Maturation of earlier design | Improvement |
@@ -18,32 +18,31 @@ The earlier submission-risk items around testing depth, AI history logging, AI c
 | Export | `PDF`, `DVI`, and `PS`, not just PDF | Expansion | Improvement |
 | Runtime/testing | `start.sh` local runtime plus Playwright E2E harness | Delivery-plan change | Improvement |
 
-## 1. Editor Model: LaTeX and File Editing Instead of Rich-Text
+## 1. Editor Model: LaTeX-First Editing Plus Rich-Text Documents
 
 **What changed**
 
-Assignment 2 describes a rich-text editor baseline with constructs such as headings, bold, italic, lists, and code blocks. The final product is instead an Overleaf-style collaborative technical editor built around:
+Assignment 2 describes a rich-text editor baseline with constructs such as headings, bold, italic, lists, and code blocks. The codebase now supports that baseline through dedicated rich-text documents while still keeping the Overleaf-style technical workflow for LaTeX files. The shipped editor model therefore has two paths:
 
-- Monaco for editing
-- Yjs/CRDT sync for collaboration
-- path-based project files
-- LaTeX as the primary document type
-- plain-text and uploaded assets as secondary document types
+- Monaco + Yjs for collaborative LaTeX and plain-text file editing
+- TipTap for rich-text documents with headings, bold, italic, lists, and code blocks
+- path-based project files that can mix technical source files and rich-text notes in the same project
 
 Relevant implementation files:
 
 - `frontend/package.json`
 - `frontend/src/components/Editor.tsx`
+- `frontend/src/components/RichTextEditor.tsx`
 - `frontend/src/pages/EditorPage.tsx`
 - `backend/app/api/documents.py`
 
 **Why this direction was chosen**
 
-The product was intentionally optimized for collaborative technical authoring rather than general rich-text writing. That decision fits equation-heavy, file-based, compile-and-preview workflows well, and it aligns with the “Overleaf remake” target the project ultimately pursued.
+The product was intentionally optimized for collaborative technical authoring rather than general rich-text writing. That decision still fits equation-heavy, file-based, compile-and-preview workflows well, and it aligns with the “Overleaf remake” target the project ultimately pursued. Adding a proper rich-text document type closes the baseline rubric gap without removing the LaTeX-first workflow that defines the rest of the product.
 
 **What this means for grading**
 
-This is the clearest remaining rubric-fit deviation. It is now being reported explicitly instead of being left implicit. The application does support structured authoring in LaTeX and Markdown-like text files, but it is not a WYSIWYG rich-text editor and should not be described as one.
+The previous rubric-fit mismatch on rich-text editing is now addressed. The remaining point to report honestly is that the product emphasis is still LaTeX-first and file-oriented, even though a compliant rich-text editor path is now included.
 
 ## 2. Authentication: JWT Cookie Pair Instead of Server-Side Sessions
 
@@ -207,9 +206,9 @@ These are no longer open deviation-reporting issues and should not be described 
 
 ## Final Position
 
-The final submission is strongest when it is described honestly as a collaborative LaTeX-first editor with advanced AI and collaboration features, not as a direct one-to-one implementation of a generic rich-text editor brief.
+The final submission is strongest when it is described honestly as a collaborative LaTeX-first editor with advanced AI and collaboration features that also includes a real rich-text document path for the baseline authoring requirements.
 
 The most important point is therefore simple:
 
-- the rich-text baseline mismatch is real and is being disclosed explicitly here
+- the rich-text baseline gap has now been closed with a dedicated rich-text editor path
 - the rest of the previously stale deviation reporting has now been corrected to match the codebase as it exists today

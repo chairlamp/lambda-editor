@@ -181,7 +181,7 @@ export default function ProjectsPage() {
           <div style={{ textAlign: 'center', paddingTop: 80, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
             <FolderOpen size={32} color={C.textDisabled} strokeWidth={1.2} />
             <p style={{ fontSize: 14, color: C.textSecondary, fontWeight: 500 }}>No projects yet</p>
-            <p style={{ fontSize: 12, color: C.textMuted }}>Create one to start writing collaborative LaTeX.</p>
+            <p style={{ fontSize: 12, color: C.textMuted }}>Create one to start writing collaborative documents.</p>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>

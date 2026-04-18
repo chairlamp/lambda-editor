@@ -114,16 +114,56 @@ describe("ProjectPage", () => {
     expect(await screen.findByText("No documents yet. Create one to get started.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /new document/i }));
-    fireEvent.change(screen.getByPlaceholderText("File path (e.g. src/app.py)"), {
+    fireEvent.change(screen.getByPlaceholderText("File path (e.g. main.tex)"), {
       target: { value: "notes.tex" },
     });
     fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
 
     await waitFor(() => {
-      expect(apiMocks.createDoc).toHaveBeenCalledWith("proj-1", "notes.tex", "");
+      expect(apiMocks.createDoc).toHaveBeenCalledWith("proj-1", "notes.tex", "", "latex");
     });
 
     expect(await screen.findByText("Editor Route")).toBeInTheDocument();
+  });
+
+  it("creates a rich text document when selected in the new document UI", async () => {
+    apiMocks.getProject.mockResolvedValue({
+      data: {
+        id: "proj-1",
+        title: "Lambda",
+        description: "Collaborative writing",
+        owner_id: user.id,
+        my_role: "owner",
+        main_doc_id: null,
+      },
+    });
+    apiMocks.createDoc.mockResolvedValue({
+      data: {
+        id: "doc-rich",
+        title: "notes.html",
+        path: "notes.html",
+        kind: "richtext",
+        owner_id: user.id,
+        project_id: "proj-1",
+        content: "<p></p>",
+        content_revision: 0,
+      },
+    });
+
+    renderProjectPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /new document/i }));
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "richtext" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("File path (e.g. notes.html)"), {
+      target: { value: "notes.html" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+
+    await waitFor(() => {
+      expect(apiMocks.createDoc).toHaveBeenCalledWith("proj-1", "notes.html", "", "richtext");
+    });
   });
 
   it("hides editing actions for viewer-only members", async () => {

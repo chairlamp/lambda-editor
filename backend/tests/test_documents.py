@@ -86,3 +86,46 @@ async def test_editor_can_update_but_not_delete_other_users_documents(client_fac
 
     missing_response = await owner.get(f"/projects/{project['id']}/documents/{doc['id']}")
     assert missing_response.status_code == 404
+
+
+async def test_create_richtext_document_uses_html_mime_and_default_paragraph(client_factory):
+    owner = await client_factory()
+
+    await _register(owner, "owner-rich@example.com", "owner-rich")
+    project = await _create_project(owner, "Rich Text")
+
+    response = await owner.post(
+        f"/projects/{project['id']}/documents",
+        json={"path": "notes.html", "kind": "richtext", "content": ""},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["kind"] == "richtext"
+    assert payload["mime_type"] == "text/html"
+    assert payload["content"] == "<p></p>"
+
+
+async def test_renaming_richtext_document_preserves_kind(client_factory):
+    owner = await client_factory()
+
+    await _register(owner, "owner-rich-rename@example.com", "owner-rich-rename")
+    project = await _create_project(owner, "Rich Rename")
+    created = await owner.post(
+        f"/projects/{project['id']}/documents",
+        json={"path": "notes.html", "kind": "richtext", "content": "<p>Hello</p>"},
+    )
+    assert created.status_code == 201
+    doc = created.json()
+
+    renamed = await owner.patch(
+        f"/projects/{project['id']}/documents/{doc['id']}",
+        json={"path": "notes/overview.md"},
+    )
+
+    assert renamed.status_code == 200
+    payload = renamed.json()
+    assert payload["path"] == "notes/overview.md"
+    assert payload["title"] == "overview.md"
+    assert payload["kind"] == "richtext"
+    assert payload["mime_type"] == "text/html"

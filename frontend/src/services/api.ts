@@ -116,8 +116,8 @@ export const docsApi = {
   listFolders: (projectId: string) => api.get(`/projects/${projectId}/documents/folders`),
   createFolder: (projectId: string, path: string) =>
     api.post(`/projects/${projectId}/documents/folders`, { path }),
-  create: (projectId: string, path: string, content = '') =>
-    api.post(`/projects/${projectId}/documents`, { path, content }),
+  create: (projectId: string, path: string, content = '', kind?: 'latex' | 'text' | 'richtext') =>
+    api.post(`/projects/${projectId}/documents`, { path, content, kind }),
   upload: (projectId: string, file: File, path?: string) => {
     const formData = new FormData()
     formData.append('file', file)

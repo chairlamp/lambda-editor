@@ -20,7 +20,7 @@ export interface Document {
   id: string
   title: string
   path: string
-  kind: 'latex' | 'text' | 'uploaded'
+  kind: 'latex' | 'text' | 'richtext' | 'uploaded'
   content?: string
   owner_id: string
   project_id: string

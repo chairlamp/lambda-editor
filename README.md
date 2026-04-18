@@ -10,7 +10,7 @@ This is Lambda. My team's project for AI1220: a remake of Overleaf with AI featu
 - **Invite links** with a per-project limit and pre-assigned access role
 - **Y.js-powered collaborative editing** with a dedicated FastAPI sync backend, Redis-backed CRDT state sharing, binary WebSocket transport, and conflict-free merges across all connected editors
 - **Real-time project file sync** so document create, rename, and delete events update every connected client immediately
-- **Monaco-powered LaTeX editor** with snippets, selection quoting, and insertion helpers
+- **Dual editor model** with a Monaco-powered LaTeX editor for technical documents and a TipTap rich-text editor for headings, bold, italic, lists, and code blocks
 - **Built-in AI assistant** with tool-enabled chat for web search, research, translation, rewriting, equation insertion, error explanation, and structured document edits
 - **Persistent AI chat history** stored per document in PostgreSQL and restored when collaborators reopen the file
 - **AI tool trace visibility** so chat replies can show which tools ran and which sources were cited
@@ -31,7 +31,7 @@ This is Lambda. My team's project for AI1220: a remake of Overleaf with AI featu
 
 | Area | Technology used |
 | --- | --- |
-| Frontend | React 18, TypeScript, Vite, Zustand, Monaco Editor |
+| Frontend | React 18, TypeScript, Vite, Zustand, Monaco Editor, TipTap |
 | Backend | FastAPI, SQLAlchemy async, PostgreSQL, WebSockets |
 | AI | Configurable OpenAI-compatible provider (`OpenAI` or `Groq`) for chat/generation, plus Google Cloud Translation API for translation tool calls |
 | Auth | JWT access/refresh tokens delivered via HTTP-only cookies, with Redis-backed refresh-token rotation |

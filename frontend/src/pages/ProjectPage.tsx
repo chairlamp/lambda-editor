@@ -25,6 +25,8 @@ interface Invite {
   label: string
 }
 
+type NewDocumentKind = 'latex' | 'text' | 'richtext'
+
 export default function ProjectPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
@@ -37,6 +39,7 @@ export default function ProjectPage() {
   const [showInvitePanel, setShowInvitePanel] = useState(false)
   const [creatingDoc, setCreatingDoc] = useState(false)
   const [newDocTitle, setNewDocTitle] = useState('')
+  const [newDocKind, setNewDocKind] = useState<NewDocumentKind>('latex')
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [newInviteRole, setNewInviteRole] = useState<'editor' | 'viewer'>('editor')
   const [newInviteLabel, setNewInviteLabel] = useState('')
@@ -128,9 +131,10 @@ export default function ProjectPage() {
   const createDoc = async () => {
     if (!newDocTitle.trim() || !projectId) return
     try {
-      const r = await docsApi.create(projectId, newDocTitle.trim(), '')
+      const r = await docsApi.create(projectId, newDocTitle.trim(), '', newDocKind)
       upsertDocument(r.data)
       setNewDocTitle('')
+      setNewDocKind('latex')
       setCreatingDoc(false)
       navigate(`/projects/${projectId}/docs/${r.data.id}`)
     } catch {
@@ -219,7 +223,10 @@ export default function ProjectPage() {
             </label>
           )}
           {canEdit && (
-            <button onClick={() => setCreatingDoc(true)} style={primaryBtn}>
+            <button onClick={() => {
+              setCreatingDoc(true)
+              setError('')
+            }} style={primaryBtn}>
               <FilePlus size={14} /> New document
             </button>
           )}
@@ -236,9 +243,18 @@ export default function ProjectPage() {
 
           {creatingDoc && (
             <div style={{ ...card, marginBottom: 16 }}>
+              <select
+                value={newDocKind}
+                onChange={(e) => setNewDocKind(e.target.value as NewDocumentKind)}
+                style={{ ...inputStyle, marginBottom: 10 }}
+              >
+                <option value="latex">LaTeX document</option>
+                <option value="text">Plain text document</option>
+                <option value="richtext">Rich text document</option>
+              </select>
               <input
                 autoFocus
-                placeholder="File path (e.g. src/app.py)"
+                placeholder={newDocKind === 'latex' ? 'File path (e.g. main.tex)' : newDocKind === 'richtext' ? 'File path (e.g. notes.html)' : 'File path (e.g. notes.md)'}
                 value={newDocTitle}
                 onChange={(e) => setNewDocTitle(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && createDoc()}
@@ -281,8 +297,8 @@ export default function ProjectPage() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
                         <span style={{
                           fontSize: 10, padding: '2px 6px', borderRadius: 999,
-                          background: doc.kind === 'latex' ? C.accentSubtle : C.blueSubtle,
-                          color: doc.kind === 'latex' ? C.accent : C.blue,
+                          background: docKindBadge(doc.kind).background,
+                          color: docKindBadge(doc.kind).color,
                           textTransform: 'uppercase', letterSpacing: 0.4,
                         }}>
                           {doc.kind}
@@ -471,6 +487,12 @@ export default function ProjectPage() {
 
 function roleColor(role: string) {
   return role === 'owner' ? C.yellow : role === 'editor' ? C.green : C.textSecondary
+}
+
+function docKindBadge(kind: Document['kind']) {
+  if (kind === 'latex') return { background: C.accentSubtle, color: C.accent }
+  if (kind === 'richtext') return { background: C.greenSubtle, color: C.green }
+  return { background: C.blueSubtle, color: C.blue }
 }
 
 const card: React.CSSProperties = {

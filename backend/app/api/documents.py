@@ -29,6 +29,7 @@ router = APIRouter(prefix="/projects/{project_id}/documents", tags=["documents"]
 class DocumentCreate(BaseModel):
     path: str = "untitled.txt"
     content: str = ""
+    kind: Optional[str] = None
 
 
 class DocumentUpdate(BaseModel):
@@ -122,6 +123,31 @@ def _infer_kind(path: str, mime_type: Optional[str] = None) -> str:
     if (mime_type or "").startswith("text/") or ext in text_exts:
         return "text"
     return "uploaded"
+
+
+def _normalize_requested_kind(kind: Optional[str]) -> Optional[str]:
+    if kind is None:
+        return None
+    normalized = kind.strip().lower()
+    if normalized not in {"latex", "text", "richtext"}:
+        raise HTTPException(status_code=400, detail="Unsupported document kind")
+    return normalized
+
+
+def _default_mime_type(kind: str, current: Optional[str] = None) -> Optional[str]:
+    if kind == "latex":
+        return "text/x-tex"
+    if kind == "richtext":
+        return "text/html"
+    if kind == "text":
+        return current if current and current != "text/x-tex" else "text/plain"
+    return current
+
+
+def _default_content(kind: str, content: str) -> str:
+    if kind == "richtext":
+        return content or "<p></p>"
+    return content
 
 
 def _safe_filename(filename: str) -> str:
@@ -247,16 +273,17 @@ async def create_document(
     path = _normalize_path(data.path)
     await _ensure_unique_document_path(project_id, path, db)
     await _ensure_directories(project_id, current_user.id, _parent_directories(path), db)
-    kind = _infer_kind(path)
+    requested_kind = _normalize_requested_kind(data.kind)
+    kind = requested_kind or _infer_kind(path)
     doc = Document(
         id=str(uuid.uuid4()),
         title=_basename(path),
         path=path,
         kind=kind,
-        content=data.content,
+        content=_default_content(kind, data.content),
         project_id=project_id,
         owner_id=current_user.id,
-        mime_type="text/x-tex" if kind == "latex" else ("text/plain" if kind == "text" else None),
+        mime_type=_default_mime_type(kind),
     )
     db.add(doc)
     await db.commit()
@@ -342,7 +369,7 @@ async def download_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    if doc.kind in {"latex", "text"}:
+    if doc.kind in {"latex", "text", "richtext"}:
         download_path = _temp_download_path(doc)
         download_path.parent.mkdir(parents=True, exist_ok=True)
         download_path.write_text(doc.content or "", encoding="utf-8")
@@ -379,14 +406,16 @@ async def update_document(
         await _ensure_directories(project_id, current_user.id, _parent_directories(next_path), db)
         doc.path = next_path
         doc.title = _basename(next_path)
-        doc.kind = _infer_kind(next_path, doc.mime_type)
-        if doc.kind in {"latex", "text"}:
+        if doc.kind != "richtext":
+            doc.kind = _infer_kind(next_path, doc.mime_type)
+        if doc.kind in {"latex", "text", "richtext"}:
             doc.storage_path = None
+            doc.mime_type = _default_mime_type(doc.kind, doc.mime_type)
 
     if data.content is not None:
         if doc.kind == "uploaded":
             raise HTTPException(status_code=400, detail="Binary uploaded files are read-only in the editor")
-        doc.content = data.content
+        doc.content = _default_content(doc.kind, data.content)
         doc.content_revision += 1
 
     await db.commit()

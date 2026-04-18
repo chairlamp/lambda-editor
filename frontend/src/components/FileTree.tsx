@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, FileCode2, FileImage, FolderPlus, Folder as FolderIcon, Loader2, Plus, Trash2, Upload } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileCode2, FileImage, FilePenLine, FolderPlus, Folder as FolderIcon, Loader2, Plus, Trash2, Upload } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { docsApi } from '../services/api'
 import { ProjectSocket } from '../services/socket'
@@ -25,9 +25,13 @@ interface TreeNode {
   children?: TreeNode[]
 }
 
+type NewDocumentKind = 'latex' | 'text' | 'richtext'
+
 function fileIcon(doc: Document) {
   return doc.kind === 'uploaded'
     ? <FileImage size={12} color={C.textMuted} />
+    : doc.kind === 'richtext'
+      ? <FilePenLine size={12} color={C.textMuted} />
     : <FileCode2 size={12} color={C.textMuted} />
 }
 
@@ -97,6 +101,7 @@ export default function FileTree({ projectId }: Props) {
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [newPath, setNewPath] = useState('')
+  const [newDocKind, setNewDocKind] = useState<NewDocumentKind>('latex')
   const [newFolderPath, setNewFolderPath] = useState('')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [renamingDocId, setRenamingDocId] = useState<string | null>(null)
@@ -163,10 +168,11 @@ export default function FileTree({ projectId }: Props) {
 
   const createFile = async () => {
     if (!projectId || !newPath.trim()) return
-    const res = await docsApi.create(projectId, newPath.trim(), '')
+    const res = await docsApi.create(projectId, newPath.trim(), '', newDocKind)
     upsertDocument(res.data)
     setCreatingFile(false)
     setNewPath('')
+    setNewDocKind('latex')
     navigate(`/projects/${projectId}/docs/${res.data.id}`)
   }
 
@@ -357,6 +363,15 @@ export default function FileTree({ projectId }: Props) {
 
       {creatingFile && (
         <div style={{ padding: '8px 10px', borderBottom: `1px solid ${C.borderFaint}` }}>
+          <select
+            value={newDocKind}
+            onChange={(e) => setNewDocKind(e.target.value as NewDocumentKind)}
+            style={{ ...inputSt, marginBottom: 8 }}
+          >
+            <option value="latex">LaTeX</option>
+            <option value="text">Text</option>
+            <option value="richtext">Rich text</option>
+          </select>
           <input
             autoFocus value={newPath}
             onChange={(e) => setNewPath(e.target.value)}
@@ -364,7 +379,7 @@ export default function FileTree({ projectId }: Props) {
               if (e.key === 'Enter') void createFile()
               if (e.key === 'Escape') setCreatingFile(false)
             }}
-            placeholder="filename.tex"
+            placeholder={newDocKind === 'latex' ? 'filename.tex' : newDocKind === 'richtext' ? 'notes.html' : 'notes.md'}
             style={inputSt}
           />
         </div>

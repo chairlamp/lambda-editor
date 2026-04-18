@@ -8,13 +8,14 @@ import AssetViewer from '../components/AssetViewer'
 import Editor from '../components/Editor'
 import FileTree from '../components/FileTree'
 import Preview from '../components/Preview'
+import RichTextEditor from '../components/RichTextEditor'
 import Toolbar from '../components/Toolbar'
 import VersionHistoryPanel from '../components/VersionHistoryPanel'
 import { WS_BASE_URL } from '../config'
 import { docsApi } from '../services/api'
 import { RoomSocket } from '../services/socket'
 import { Presence, useStore } from '../store/useStore'
-import { saveEventMatchesContent } from '../utils/save-state'
+import { createSaveFingerprint, saveEventMatchesContent } from '../utils/save-state'
 
 interface RemoteCursor {
   color: string
@@ -75,6 +76,8 @@ export default function EditorPage() {
 
   // Wait for the first Yjs sync so Monaco never binds to an empty CRDT snapshot.
   const [syncedYdoc, setSyncedYdoc] = useState<Y.Doc | null>(null)
+  const richTextPersistedRef = useRef<{ docId: string; content: string } | null>(null)
+  const richTextSaveSeqRef = useRef(0)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -97,7 +100,9 @@ export default function EditorPage() {
   }, [viewMode])
 
   const isLatexDoc = currentDoc?.kind === 'latex'
-  const isEditableDoc = currentDoc?.kind === 'latex' || currentDoc?.kind === 'text'
+  const isRichTextDoc = currentDoc?.kind === 'richtext'
+  const usesYjs = currentDoc?.kind === 'latex' || currentDoc?.kind === 'text'
+  const isEditableDoc = usesYjs || isRichTextDoc
   const showEditorPane = !isLatexDoc || viewMode !== 'preview'
   const showPreviewPane = isLatexDoc && viewMode !== 'editor'
   const editorLanguage = (() => {
@@ -146,6 +151,14 @@ export default function EditorPage() {
     docsApi.get(projectId, docId)
       .then((res) => {
         setCurrentDoc(res.data)
+        if (res.data.kind === 'richtext') {
+          richTextPersistedRef.current = {
+            docId: res.data.id,
+            content: res.data.content || '<p></p>',
+          }
+        } else {
+          richTextPersistedRef.current = null
+        }
         if (res.data.kind === 'latex') {
           setCompiledPdf(res.data.compile_success ? res.data.compile_pdf_base64 : null, res.data.compile_log || '')
         } else {
@@ -214,6 +227,17 @@ export default function EditorPage() {
         if (!msg.user_id || !msg.username) return
         setTypingUser({ user_id: msg.user_id as string, username: msg.username as string }, !!msg.is_typing)
       }),
+      socket.on('update', (msg: any) => {
+        const activeDoc = useStore.getState().currentDoc
+        if (!activeDoc || activeDoc.id !== docId || activeDoc.kind !== 'richtext') return
+        const nextContent = typeof msg.content === 'string' ? msg.content : activeDoc.content || '<p></p>'
+        richTextPersistedRef.current = { docId, content: nextContent }
+        updateDocSyncState({
+          content: nextContent,
+          content_revision: typeof msg.revision === 'number' ? msg.revision : activeDoc.content_revision,
+        })
+        setSaveState('saved')
+      }),
       socket.on('save_status', (msg: any) => {
         const activeDoc = useStore.getState().currentDoc
         if (!activeDoc || activeDoc.id !== docId) return
@@ -247,9 +271,9 @@ export default function EditorPage() {
     }
   }, [docId, token, isEditableDoc, currentDoc?.kind, setConnected, setPresence, updateDocTitle, updateDocSyncState, setCompiledPdf, setTypingUser, clearTypingUsers, setSaveState])
 
-  // Start Monaco binding only after the provider has real document state to avoid flicker.
+  // Start Yjs binding only after the provider has real document state to avoid flicker.
   useEffect(() => {
-    if (!docId || !isEditableDoc) {
+    if (!docId || !usesYjs) {
       setSyncedYdoc(null)
       return
     }
@@ -283,7 +307,54 @@ export default function EditorPage() {
       provider.destroy()
       doc.destroy()
     }
-  }, [docId, isEditableDoc, updateDocContent])
+  }, [docId, usesYjs, updateDocContent])
+
+  useEffect(() => {
+    if (!projectId || !currentDoc || currentDoc.kind !== 'richtext' || readOnly) return
+    const persisted = richTextPersistedRef.current
+    if (!persisted || persisted.docId !== currentDoc.id) {
+      richTextPersistedRef.current = {
+        docId: currentDoc.id,
+        content: currentDoc.content || '<p></p>',
+      }
+      return
+    }
+
+    const currentContent = currentDoc.content || '<p></p>'
+    if (currentContent === persisted.content) return
+
+    setSaveState('saving')
+    const saveSeq = ++richTextSaveSeqRef.current
+    const timeoutId = window.setTimeout(() => {
+      void docsApi.update(projectId, currentDoc.id, { content: currentContent })
+        .then((response) => {
+          if (richTextSaveSeqRef.current !== saveSeq) return
+          const savedContent = response.data.content || '<p></p>'
+          richTextPersistedRef.current = {
+            docId: response.data.id,
+            content: savedContent,
+          }
+          updateDocSyncState({
+            content: savedContent,
+            content_revision: response.data.content_revision,
+            updated_at: response.data.updated_at,
+          })
+          const fingerprint = createSaveFingerprint(savedContent)
+          if (saveEventMatchesContent(useStore.getState().currentDoc?.content || '', {
+            content_hash: fingerprint.contentHash,
+            content_length: fingerprint.contentLength,
+          })) {
+            setSaveState('saved')
+          }
+        })
+        .catch((error: any) => {
+          if (richTextSaveSeqRef.current !== saveSeq) return
+          setSaveState('error', error?.response?.data?.detail || 'Could not persist document changes.')
+        })
+    }, 900)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [projectId, currentDoc, readOnly, isConnected, setSaveState, updateDocSyncState])
 
   // Clear LaTeX-only UI state when the current file can no longer use those actions.
   useEffect(() => {
@@ -405,20 +476,30 @@ export default function EditorPage() {
         {showEditorPane && (
           <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
             {isEditableDoc ? (
-              <Editor
-                ydoc={syncedYdoc}
-                socket={socketRef.current}
-                readOnly={readOnly}
-                remoteDecorations={remoteDecorations}
-                onRegisterTextInserter={(fn) => { textInserterRef.current = fn }}
-                onCursorMove={handleOwnCursorMove}
-                onSelectionQuote={(q) => setQuoteForChat(q)}
-                pickingLocation={pickingEquationLocation}
-                onLocationPicked={(loc) => { setEquationLocation(loc); setPickingEquationLocation(false) }}
-                ownUsername={user?.username}
-                ownColor={C.accent}
-                language={editorLanguage}
-              />
+              isRichTextDoc ? (
+                <RichTextEditor
+                  content={currentDoc?.content || '<p></p>'}
+                  readOnly={readOnly}
+                  socket={socketRef.current}
+                  onChange={updateDocContent}
+                  onDirty={() => setSaveState('saving')}
+                />
+              ) : (
+                <Editor
+                  ydoc={syncedYdoc}
+                  socket={socketRef.current}
+                  readOnly={readOnly}
+                  remoteDecorations={remoteDecorations}
+                  onRegisterTextInserter={(fn) => { textInserterRef.current = fn }}
+                  onCursorMove={handleOwnCursorMove}
+                  onSelectionQuote={(q) => setQuoteForChat(q)}
+                  pickingLocation={pickingEquationLocation}
+                  onLocationPicked={(loc) => { setEquationLocation(loc); setPickingEquationLocation(false) }}
+                  ownUsername={user?.username}
+                  ownColor={C.accent}
+                  language={editorLanguage}
+                />
+              )
             ) : (
               <AssetViewer projectId={projectId} />
             )}

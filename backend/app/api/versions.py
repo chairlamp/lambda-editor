@@ -168,8 +168,9 @@ async def create_version_restoration(
     doc.content_revision += 1
     await db.commit()
 
-    # Fan the restored snapshot into active Yjs rooms so collaborators do not keep editing stale state.
-    await yjs_handler.invalidate_room(doc_id, ver.content)
+    # Only Yjs-backed document kinds need the CRDT room invalidated on restore.
+    if doc.kind in {"latex", "text"}:
+        await yjs_handler.invalidate_room(doc_id, ver.content)
 
     await manager.broadcast_to_room(
         doc_id,
