@@ -51,8 +51,8 @@ async def test_streaming_ai_generation_persists_history(client, monkeypatch):
         async for chunk in response.aiter_text():
             body += chunk
 
-    assert "data: Hello" in body
-    assert "data:  world" in body
+    assert 'data: "Hello"' in body
+    assert 'data: " world"' in body
     assert "data: [DONE]" in body
 
     history_response = await client.get(

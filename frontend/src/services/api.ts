@@ -166,8 +166,13 @@ export const aiChatApi = {
     api.patch(`/projects/${projectId}/documents/${docId}/ai/messages/${messageId}`, { accepted, rejected }),
 }
 
-// Parse streamed `data:` frames so chat UIs can render long responses incrementally.
+// Parse streamed SSE frames so chat UIs can render long responses incrementally.
 // Pass an AbortController signal to allow the caller to cancel mid-stream.
+//
+// The server JSON-encodes chunk payloads so newlines survive SSE framing, and
+// surfaces failures as an explicit `event: error` frame. Parsing follows the
+// SSE spec: frames are separated by blank lines, and multi-line `data:` fields
+// are concatenated with newlines before being decoded.
 export async function streamAI(
   endpoint: string,
   body: Record<string, unknown>,
@@ -179,7 +184,7 @@ export async function streamAI(
   const makeRequest = () => fetch(apiUrl(endpoint), {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
     body: JSON.stringify(body),
     signal,
   })
@@ -203,28 +208,63 @@ export async function streamAI(
     }
   }
 
-  if (!res.ok) {
+  if (!res.ok || !res.body) {
     onError(`Request failed: ${res.status}`)
     return
   }
 
-  const reader = res.body!.getReader()
+  const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let event = ''
+  let dataLines: string[] = []
+
+  const dispatch = (): boolean => {
+    if (dataLines.length === 0 && !event) return false
+    const raw = dataLines.join('\n')
+    const currentEvent = event
+    event = ''
+    dataLines = []
+
+    if (currentEvent === 'error') {
+      let message = raw
+      try { message = JSON.parse(raw) } catch { /* fall back to raw */ }
+      onError(message || 'stream error')
+      return true // stop consuming further frames
+    }
+
+    if (raw === '[DONE]') { onDone(); return true }
+
+    try {
+      onChunk(JSON.parse(raw))
+    } catch {
+      // Tolerate older/plain frames so unit tests and legacy callers still work.
+      onChunk(raw)
+    }
+    return false
+  }
 
   try {
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
+      // SSE lines can end with \n, \r, or \r\n; normalize before splitting.
+      const normalized = buffer.replace(/\r\n?/g, '\n')
+      const lines = normalized.split('\n')
+      buffer = lines.pop() ?? ''
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6)
-          if (data === '[DONE]') { onDone(); return }
-          onChunk(data)
+        if (line === '') {
+          if (dispatch()) return
+          continue
         }
+        if (line.startsWith(':')) continue // SSE comment — used as keep-alive
+        const colon = line.indexOf(':')
+        const field = colon === -1 ? line : line.slice(0, colon)
+        const rawValue = colon === -1 ? '' : line.slice(colon + 1)
+        const value = rawValue.startsWith(' ') ? rawValue.slice(1) : rawValue
+        if (field === 'data') dataLines.push(value)
+        else if (field === 'event') event = value
       }
     }
   } catch (err: any) {
