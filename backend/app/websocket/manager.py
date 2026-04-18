@@ -180,12 +180,15 @@ class ConnectionManager:
                 await room.close()
                 del self.rooms[room_id]
 
-    async def broadcast_to_room(self, room_id: str, message: dict):
+    async def broadcast_to_room(self, room_id: str, message: dict, exclude: Optional[str] = None):
         room = self.rooms.get(room_id)
         if not room:
-            await redis_client.publish(f"room:{room_id}:events", json.dumps({**message, "_exclude": None}))
+            await redis_client.publish(
+                f"room:{room_id}:events",
+                json.dumps({**message, "_exclude": exclude}),
+            )
             return
-        await room.broadcast(message)
+        await room.broadcast(message, exclude=exclude)
         await self.cleanup_room(room_id)
 
 

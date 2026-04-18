@@ -420,6 +420,8 @@ def _sse(
     on_cancel=None,
     doc_id: Optional[str] = None,
     action_id: Optional[str] = None,
+    broadcast_exclude_user_id: Optional[str] = None,
+    actor_username: Optional[str] = None,
 ):
     """Wrap an async text generator as an SSE stream.
 
@@ -428,6 +430,17 @@ def _sse(
     tokens. Errors surface as an explicit ``event: error`` frame; client
     disconnects cancel the generator cleanly without running ``on_complete``.
     """
+
+    def room_message(event: str, **extra: object) -> dict[str, object]:
+        message: dict[str, object] = {
+            "type": "ai_chat",
+            "event": event,
+            "action_id": action_id,
+        }
+        if actor_username:
+            message["username"] = actor_username
+        message.update(extra)
+        return message
 
     async def generate():
         collected: list[str] = []
@@ -440,30 +453,43 @@ def _sse(
                     continue
                 collected.append(chunk)
                 if doc_id:
-                    await manager.broadcast_to_room(doc_id, {
-                        "type": "ai_chat",
-                        "event": "chunk",
-                        "action_id": action_id,
-                        "content": chunk,
-                    })
+                    await manager.broadcast_to_room(
+                        doc_id,
+                        room_message("chunk", content=chunk),
+                        exclude=broadcast_exclude_user_id,
+                    )
                 yield f"data: {json.dumps(chunk)}\n\n"
         except asyncio.CancelledError:
             # Client disconnect cancels the generator; on_cancel lets callers persist
             # partial state (e.g. mark the action cancelled) before we propagate.
             if on_cancel is not None:
                 await on_cancel("".join(collected))
+            if doc_id:
+                await manager.broadcast_to_room(
+                    doc_id,
+                    room_message(
+                        "cancelled",
+                        response_kind="res",
+                        status=AI_STATUS_CANCELLED,
+                        error="Cancelled by user",
+                    ),
+                    exclude=broadcast_exclude_user_id,
+                )
             raise
         except Exception as exc:  # noqa: BLE001 — surface any provider error to the client
             logger.exception("AI stream failed")
             if on_error is not None:
                 await on_error(str(exc))
             if doc_id:
-                await manager.broadcast_to_room(doc_id, {
-                    "type": "ai_chat",
-                    "event": "error",
-                    "action_id": action_id,
-                    "content": str(exc) or "stream_failed",
-                })
+                await manager.broadcast_to_room(
+                    doc_id,
+                    room_message(
+                        "done",
+                        status=AI_STATUS_FAILED,
+                        error=str(exc) or "stream_failed",
+                    ),
+                    exclude=broadcast_exclude_user_id,
+                )
             yield f"event: error\ndata: {json.dumps(str(exc) or 'stream_failed')}\n\n"
             yield "data: [DONE]\n\n"
             return
@@ -474,11 +500,11 @@ def _sse(
                 logger.exception("AI stream on_complete failed")
 
         if doc_id:
-            await manager.broadcast_to_room(doc_id, {
-                "type": "ai_chat",
-                "event": "done",
-                "action_id": action_id,
-            })
+            await manager.broadcast_to_room(
+                doc_id,
+                room_message("done", status=AI_STATUS_COMPLETED),
+                exclude=broadcast_exclude_user_id,
+            )
 
         yield "data: [DONE]\n\n"
 
@@ -541,6 +567,8 @@ async def generate(
         ),
         doc_id=doc_id,
         action_id=req.action_id,
+        broadcast_exclude_user_id=current_user.id,
+        actor_username=current_user.username,
     )
 
 
@@ -669,6 +697,8 @@ async def rewrite(
         ),
         doc_id=doc_id,
         action_id=req.action_id,
+        broadcast_exclude_user_id=current_user.id,
+        actor_username=current_user.username,
     )
 
 

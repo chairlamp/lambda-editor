@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 
@@ -6,6 +7,7 @@ from app.api import ai as ai_module
 from app.services import ai_service
 from app.config import settings
 from app.services.ai_cancellation import AICancelledError
+from app.websocket.manager import manager
 
 
 async def _register(client, email: str, username: str):
@@ -174,6 +176,73 @@ async def _drain(response) -> str:
     return body
 
 
+class _RoomWebSocket:
+    def __init__(self):
+        self.messages: asyncio.Queue[dict] = asyncio.Queue()
+
+    async def send_text(self, data: str):
+        await self.messages.put(json.loads(data))
+
+    async def next_json(self) -> dict:
+        return await asyncio.wait_for(self.messages.get(), timeout=2.0)
+
+
+async def test_sse_streams_chunks_to_collaborators_without_echoing_initiator():
+    room_id = "doc-stream-success"
+    initiator_ws = _RoomWebSocket()
+    collaborator_ws = _RoomWebSocket()
+    room = await manager.get_or_create_room(room_id)
+    await room.add("owner", "owner", initiator_ws)
+    await room.add("editor", "editor", collaborator_ws)
+
+    async def good_gen():
+        yield "Hello"
+        yield " world"
+
+    try:
+        response = ai_module._sse(
+            None,
+            good_gen(),
+            doc_id=room_id,
+            action_id="act-room",
+            broadcast_exclude_user_id="owner",
+            actor_username="owner",
+        )
+        body = await _drain(response)
+
+        assert 'data: "Hello"' in body
+        assert 'data: " world"' in body
+        assert "data: [DONE]" in body
+
+        assert await collaborator_ws.next_json() == {
+            "type": "ai_chat",
+            "event": "chunk",
+            "action_id": "act-room",
+            "username": "owner",
+            "content": "Hello",
+        }
+        assert await collaborator_ws.next_json() == {
+            "type": "ai_chat",
+            "event": "chunk",
+            "action_id": "act-room",
+            "username": "owner",
+            "content": " world",
+        }
+        assert await collaborator_ws.next_json() == {
+            "type": "ai_chat",
+            "event": "done",
+            "action_id": "act-room",
+            "username": "owner",
+            "status": "completed",
+        }
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(initiator_ws.next_json(), timeout=0.05)
+    finally:
+        await room.remove("owner")
+        await room.remove("editor")
+        await manager.cleanup_room(room_id)
+
+
 async def test_sse_error_emits_explicit_event_frame_and_skips_on_complete():
     """Provider failures mid-stream must surface as an SSE error event, and
     ``on_complete`` must not run so partial output is never persisted."""
@@ -197,11 +266,67 @@ async def test_sse_error_emits_explicit_event_frame_and_skips_on_complete():
     assert completions == []
 
 
+async def test_sse_error_notifies_collaborators_with_failed_done_event():
+    room_id = "doc-stream-error"
+    initiator_ws = _RoomWebSocket()
+    collaborator_ws = _RoomWebSocket()
+    room = await manager.get_or_create_room(room_id)
+    await room.add("owner", "owner", initiator_ws)
+    await room.add("editor", "editor", collaborator_ws)
+
+    async def bad_gen():
+        yield "Hello"
+        raise RuntimeError("boom")
+
+    try:
+        response = ai_module._sse(
+            None,
+            bad_gen(),
+            doc_id=room_id,
+            action_id="act-error",
+            broadcast_exclude_user_id="owner",
+            actor_username="owner",
+        )
+        body = await _drain(response)
+
+        assert 'data: "Hello"' in body
+        assert "event: error" in body
+        assert "boom" in body
+
+        assert await collaborator_ws.next_json() == {
+            "type": "ai_chat",
+            "event": "chunk",
+            "action_id": "act-error",
+            "username": "owner",
+            "content": "Hello",
+        }
+        assert await collaborator_ws.next_json() == {
+            "type": "ai_chat",
+            "event": "done",
+            "action_id": "act-error",
+            "username": "owner",
+            "status": "failed",
+            "error": "boom",
+        }
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(initiator_ws.next_json(), timeout=0.05)
+    finally:
+        await room.remove("owner")
+        await room.remove("editor")
+        await manager.cleanup_room(room_id)
+
+
 async def test_sse_client_disconnect_cancels_stream_without_persisting():
     """A client disconnect cancels the generator task; partial chunks must
     not reach ``on_complete`` because history is only persisted on success."""
 
     gate = asyncio.Event()  # never set — forces the generator to suspend
+    room_id = "doc-stream-cancel"
+    initiator_ws = _RoomWebSocket()
+    collaborator_ws = _RoomWebSocket()
+    room = await manager.get_or_create_room(room_id)
+    await room.add("owner", "owner", initiator_ws)
+    await room.add("editor", "editor", collaborator_ws)
 
     async def slow_gen():
         yield "Hello"
@@ -213,24 +338,57 @@ async def test_sse_client_disconnect_cancels_stream_without_persisting():
     async def on_complete(content: str) -> None:
         completions.append(content)
 
-    response = ai_module._sse(None, slow_gen(), on_complete=on_complete)
-    it = response.body_iterator.__aiter__()
+    try:
+        response = ai_module._sse(
+            None,
+            slow_gen(),
+            on_complete=on_complete,
+            doc_id=room_id,
+            action_id="act-cancel",
+            broadcast_exclude_user_id="owner",
+            actor_username="owner",
+        )
+        it = response.body_iterator.__aiter__()
 
-    # Pull the open-comment and the first chunk so the generator is suspended
-    # inside _with_heartbeats, waiting for the next token from slow_gen.
-    open_frame = await it.__anext__()
-    first_chunk = await it.__anext__()
-    assert ": open" in (open_frame if isinstance(open_frame, str) else open_frame.decode())
-    assert 'data: "Hello"' in (first_chunk if isinstance(first_chunk, str) else first_chunk.decode())
+        # Pull the open-comment and the first chunk so the generator is suspended
+        # inside _with_heartbeats, waiting for the next token from slow_gen.
+        open_frame = await it.__anext__()
+        first_chunk = await it.__anext__()
+        assert ": open" in (open_frame if isinstance(open_frame, str) else open_frame.decode())
+        assert 'data: "Hello"' in (first_chunk if isinstance(first_chunk, str) else first_chunk.decode())
 
-    # Simulate the client going away: cancel the pending __anext__.
-    pending = asyncio.create_task(it.__anext__())
-    await asyncio.sleep(0)
-    pending.cancel()
-    with pytest.raises((asyncio.CancelledError, StopAsyncIteration)):
-        await pending
+        assert await collaborator_ws.next_json() == {
+            "type": "ai_chat",
+            "event": "chunk",
+            "action_id": "act-cancel",
+            "username": "owner",
+            "content": "Hello",
+        }
 
-    assert completions == []
+        # Simulate the client going away: cancel the pending __anext__.
+        pending = asyncio.create_task(it.__anext__())
+        await asyncio.sleep(0)
+        pending.cancel()
+        with pytest.raises((asyncio.CancelledError, StopAsyncIteration)):
+            await pending
+
+        assert await collaborator_ws.next_json() == {
+            "type": "ai_chat",
+            "event": "cancelled",
+            "action_id": "act-cancel",
+            "username": "owner",
+            "response_kind": "res",
+            "status": "cancelled",
+            "error": "Cancelled by user",
+        }
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(initiator_ws.next_json(), timeout=0.05)
+
+        assert completions == []
+    finally:
+        await room.remove("owner")
+        await room.remove("editor")
+        await manager.cleanup_room(room_id)
 
 
 async def test_failed_ai_diff_is_persisted_with_error_metadata(client, monkeypatch):

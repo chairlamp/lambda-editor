@@ -489,12 +489,10 @@ export default function AIChat({
         } else {
           appendChunk(responseId, chunk)
         }
-        broadcast({ event: 'chunk', content: chunk, action_id: aid })
       },
       () => {
         clearActiveRequest()
         finalizeMsg(responseId, { status: 'completed' })
-        broadcast({ event: 'done', action_id: aid, status: 'completed' })
       },
       (err) => {
         clearActiveRequest()
@@ -502,19 +500,10 @@ export default function AIChat({
         if (!started) startStreamingMsg(responseId, errorChunk, { status: 'failed', error: err })
         else appendChunk(responseId, errorChunk)
         finalizeMsg(responseId, { status: 'failed', error: err })
-        broadcast({ event: 'done', action_id: aid, status: 'failed', error: err })
       },
       () => {
         clearActiveRequest()
         markCancelled(responseId, 'assistant')
-        broadcast({
-          event: 'cancelled',
-          action_id: aid,
-          response_id: responseId,
-          response_kind: 'res',
-          status: 'cancelled',
-          error: 'Cancelled by user',
-        })
       },
       controller.signal,
     )
