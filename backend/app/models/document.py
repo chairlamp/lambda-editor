@@ -35,3 +35,7 @@ class Document(Base):
         "DocumentVersion", back_populates="document", cascade="all, delete-orphan",
         order_by="DocumentVersion.created_at.desc()",
     )
+    ai_messages: Mapped[list["AIChatMessage"]] = relationship(
+        "AIChatMessage", back_populates="document", cascade="all, delete-orphan",
+        order_by="AIChatMessage.created_at.asc()",
+    )

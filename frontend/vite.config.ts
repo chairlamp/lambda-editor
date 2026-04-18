@@ -17,4 +17,8 @@ export default defineConfig({
       },
     },
   },
+  test: {
+    include: ['src/test/**/*.{test,spec}.{ts,tsx}'],
+    exclude: ['e2e/**', '**/e2e/**'],
+  },
 })

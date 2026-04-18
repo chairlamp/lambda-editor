@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -18,6 +19,15 @@ from app.database import get_db
 from app.services import ai_service
 from app.services import agent_service
 from app.websocket.manager import manager
+
+logger = logging.getLogger(__name__)
+
+SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    # Disable proxy buffering (Nginx/Cloudflare) so chunks reach the client immediately.
+    "X-Accel-Buffering": "no",
+}
 
 router = APIRouter(tags=["ai"])
 
@@ -212,32 +222,57 @@ async def _persist_assistant_message(
     await db.commit()
 
 
+def _sse(
+    generator,
+    *,
+    on_complete=None,
+    doc_id: Optional[str] = None,
+    action_id: Optional[str] = None,
+):
+    """Wrap an async text generator as an SSE stream.
 
-async def _fake_stream(text: str):
-    words = text.split()
-    for word in words:
-        await asyncio.sleep(0.15)
-        yield word + " "
+    Chunks are JSON-encoded so embedded newlines survive SSE framing, and
+    mirrored to the document's WebSocket room so collaborators see live
+    tokens. Errors surface as an explicit ``event: error`` frame; client
+    disconnects cancel the generator cleanly without running ``on_complete``.
+    """
 
-def _sse(generator, *, on_complete=None, doc_id: Optional[str] = None, action_id: Optional[str] = None):
     async def generate():
-        collected = []
-
-        async for chunk in generator:
-            collected.append(chunk)
-
+        collected: list[str] = []
+        # A leading comment flushes headers/intermediaries before the first token.
+        yield ": open\n\n"
+        try:
+            async for chunk in generator:
+                collected.append(chunk)
+                if doc_id:
+                    await manager.broadcast_to_room(doc_id, {
+                        "type": "ai_chat",
+                        "event": "chunk",
+                        "action_id": action_id,
+                        "content": chunk,
+                    })
+                yield f"data: {json.dumps(chunk)}\n\n"
+        except asyncio.CancelledError:
+            # Client disconnected mid-stream; drop partial content without persisting.
+            raise
+        except Exception as exc:  # noqa: BLE001 — surface any provider error to the client
+            logger.exception("AI stream failed")
             if doc_id:
                 await manager.broadcast_to_room(doc_id, {
                     "type": "ai_chat",
-                    "event": "chunk",
+                    "event": "error",
                     "action_id": action_id,
-                    "content": chunk,
+                    "content": str(exc) or "stream_failed",
                 })
-
-            yield f"data: {chunk}\n\n"
+            yield f"event: error\ndata: {json.dumps(str(exc) or 'stream_failed')}\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
         if on_complete is not None:
-            await on_complete("".join(collected))
+            try:
+                await on_complete("".join(collected))
+            except Exception:  # noqa: BLE001 — persistence failure should not kill the stream
+                logger.exception("AI stream on_complete failed")
 
         if doc_id:
             await manager.broadcast_to_room(doc_id, {
@@ -248,7 +283,11 @@ def _sse(generator, *, on_complete=None, doc_id: Optional[str] = None, action_id
 
         yield "data: [DONE]\n\n"
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
 
 
 @router.post("/projects/{project_id}/documents/{doc_id}/ai/text-generations")
@@ -270,6 +309,8 @@ async def generate(
             f"{req.action_id}-res" if req.action_id else None,
             content=content,
         ),
+        doc_id=doc_id,
+        action_id=req.action_id,
     )
 
 
@@ -309,9 +350,8 @@ async def rewrite(
     db: AsyncSession = Depends(get_db),
 ):
     await _require_document_edit_access(project_id, doc_id, current_user.id, db)
-
     return _sse(
-        _fake_stream(f"Fake rewritten output for: {req.text}"),
+        ai_service.rewrite_text(req.text, req.style, req.document_context or ""),
         on_complete=lambda content: _persist_assistant_message(
             db,
             current_user.id,

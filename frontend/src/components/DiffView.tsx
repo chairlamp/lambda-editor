@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Check, X, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react'
+import { Check, X, ArrowRight, ChevronDown, ChevronUp, Pencil } from 'lucide-react'
+import { C } from '../design'
 
 export interface DiffChange {
   id: string
@@ -34,6 +35,8 @@ export default function DiffView({
   canReview = true,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set(changes.map((c) => c.id)))
+  // editingId → current draft text for that change
+  const [editDrafts, setEditDrafts] = useState<Map<string, string>>(new Map())
 
   const toggle = (id: string) => {
     setExpanded((prev) => {
@@ -43,13 +46,36 @@ export default function DiffView({
     })
   }
 
+  const startEdit = (change: DiffChange) => {
+    setEditDrafts((prev) => {
+      const next = new Map(prev)
+      next.set(change.id, change.new_text)
+      return next
+    })
+  }
+
+  const cancelEdit = (id: string) => {
+    setEditDrafts((prev) => {
+      const next = new Map(prev)
+      next.delete(id)
+      return next
+    })
+  }
+
+  const acceptEdited = (change: DiffChange) => {
+    const draft = editDrafts.get(change.id)
+    onAccept({ ...change, new_text: draft ?? change.new_text })
+    cancelEdit(change.id)
+  }
+
   const pending = changes.filter((c) => !accepted.has(c.id) && !rejected.has(c.id))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{
-        background: '#1e2a4a', borderRadius: 8, padding: '10px 14px',
-        fontSize: 13, color: '#c7d2fe', lineHeight: 1.5,
+        background: C.bgCard, borderRadius: 8, padding: '10px 14px',
+        fontSize: 13, color: C.textPrimary, lineHeight: 1.55,
+        border: `1px solid ${C.borderFaint}`,
       }}>
         {explanation}
       </div>
@@ -59,16 +85,16 @@ export default function DiffView({
           {pending.length > 0 && canReview && (
             <>
               <button onClick={onAcceptAll} style={acceptAllBtn}>
-                <Check size={12} /> Accept all ({pending.length})
+                <Check size={11} /> Accept all ({pending.length})
               </button>
               <button onClick={onRejectAll} style={rejectAllBtn}>
-                <X size={12} /> Reject all
+                <X size={11} /> Reject all
               </button>
             </>
           )}
           {onAskDifferent && (
             <button onClick={onAskDifferent} style={alternateBtn}>
-              <ArrowRight size={12} /> Continue
+              <ArrowRight size={11} /> Continue
             </button>
           )}
         </div>
@@ -79,45 +105,64 @@ export default function DiffView({
         const isRejected = rejected.has(change.id)
         const isPending = !isAccepted && !isRejected
         const isOpen = expanded.has(change.id)
+        const isEditing = editDrafts.has(change.id)
+        const draft = editDrafts.get(change.id) ?? change.new_text
 
         return (
           <div
             key={change.id}
             style={{
               borderRadius: 8, overflow: 'hidden',
-              border: `1px solid ${isAccepted ? '#166534' : isRejected ? '#7f1d1d' : '#2a2a4a'}`,
+              border: `1px solid ${isAccepted ? 'rgba(52,211,153,0.25)' : isRejected ? 'rgba(248,113,113,0.2)' : isEditing ? 'rgba(96,165,250,0.3)' : C.border}`,
               opacity: isRejected ? 0.5 : 1,
             }}
           >
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '8px 12px',
-              background: isAccepted ? '#14532d20' : isRejected ? '#7f1d1d20' : '#1e1e3a',
+              padding: '7px 12px',
+              background: isAccepted ? C.greenSubtle : isRejected ? C.redSubtle : isEditing ? C.blueSubtle : C.bgRaised,
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                 <button onClick={() => toggle(change.id)} style={chevronBtn}>
-                  {isOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  {isOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
                 </button>
-                <span style={{ fontSize: 12, color: '#9ca3af' }}>
+                <span style={{ fontSize: 12, color: C.textSecondary }}>
                   {change.description || `Change ${change.id}`}
                 </span>
-                {isAccepted && <span style={{ fontSize: 11, color: '#4ade80' }}>✓ accepted</span>}
-                {isRejected && <span style={{ fontSize: 11, color: '#f87171' }}>✗ rejected</span>}
+                {isAccepted && <span style={{ fontSize: 10.5, color: C.green }}>✓ accepted</span>}
+                {isRejected && <span style={{ fontSize: 10.5, color: C.red }}>✗ rejected</span>}
+                {isEditing && <span style={{ fontSize: 10.5, color: C.blue }}>editing…</span>}
               </div>
               {isPending && canReview && (
                 <div style={{ display: 'flex', gap: 4 }}>
-                  <button onClick={() => onAccept(change)} style={acceptBtn} title="Accept">
-                    <Check size={11} />
-                  </button>
-                  <button onClick={() => onReject(change.id)} style={rejectBtn} title="Reject">
-                    <X size={11} />
-                  </button>
+                  {isEditing ? (
+                    <>
+                      <button onClick={() => acceptEdited(change)} style={acceptBtn} title="Accept edited version">
+                        <Check size={11} />
+                      </button>
+                      <button onClick={() => cancelEdit(change.id)} style={rejectBtn} title="Cancel edit">
+                        <X size={11} />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => startEdit(change)} style={editBtn} title="Edit before accepting">
+                        <Pencil size={11} />
+                      </button>
+                      <button onClick={() => onAccept(change)} style={acceptBtn} title="Accept">
+                        <Check size={11} />
+                      </button>
+                      <button onClick={() => onReject(change.id)} style={rejectBtn} title="Reject">
+                        <X size={11} />
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
 
             {isPending && !canReview && (
-              <div style={{ padding: '0 12px 8px', fontSize: 11, color: '#6b7280' }}>
+              <div style={{ padding: '0 12px 8px', fontSize: 11, color: C.textMuted }}>
                 Viewers cannot accept or reject AI changes.
               </div>
             )}
@@ -128,28 +173,50 @@ export default function DiffView({
                   <div
                     key={`old-${i}`}
                     style={{
-                      padding: '2px 12px', background: '#3b0d0d',
+                      padding: '2px 12px', background: 'rgba(248,113,113,0.07)',
                       color: '#fca5a5', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                      borderLeft: '3px solid #ef4444',
+                      borderLeft: `3px solid ${C.red}`,
                     }}
                   >
-                    <span style={{ color: '#f87171', marginRight: 8, userSelect: 'none' }}>−</span>
+                    <span style={{ color: C.red, marginRight: 8, userSelect: 'none' }}>−</span>
                     {line || ' '}
                   </div>
                 ))}
-                {change.new_text && change.new_text.split('\n').map((line, i) => (
-                  <div
-                    key={`new-${i}`}
-                    style={{
-                      padding: '2px 12px', background: '#0d2b1d',
-                      color: '#86efac', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                      borderLeft: '3px solid #22c55e',
-                    }}
-                  >
-                    <span style={{ color: '#4ade80', marginRight: 8, userSelect: 'none' }}>+</span>
-                    {line || ' '}
+
+                {isEditing ? (
+                  <div style={{ background: C.blueSubtle, padding: '8px 12px', borderLeft: `3px solid ${C.blue}` }}>
+                    <div style={{ fontSize: 10.5, color: C.blue, marginBottom: 4 }}>Edit replacement text:</div>
+                    <textarea
+                      value={draft}
+                      onChange={(e) => setEditDrafts((prev) => {
+                        const next = new Map(prev)
+                        next.set(change.id, e.target.value)
+                        return next
+                      })}
+                      style={{
+                        width: '100%', minHeight: 80, background: C.bgBase,
+                        border: `1px solid ${C.blue}`, borderRadius: 5,
+                        color: C.textPrimary, fontFamily: 'monospace', fontSize: 12,
+                        padding: '6px 8px', resize: 'vertical', outline: 'none', boxSizing: 'border-box',
+                      }}
+                      autoFocus
+                    />
                   </div>
-                ))}
+                ) : (
+                  change.new_text && change.new_text.split('\n').map((line, i) => (
+                    <div
+                      key={`new-${i}`}
+                      style={{
+                        padding: '2px 12px', background: 'rgba(52,211,153,0.07)',
+                        color: '#86efac', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                        borderLeft: `3px solid ${C.green}`,
+                      }}
+                    >
+                      <span style={{ color: C.green, marginRight: 8, userSelect: 'none' }}>+</span>
+                      {line || ' '}
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </div>
@@ -161,27 +228,35 @@ export default function DiffView({
 
 const acceptBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
-  width: 22, height: 22, borderRadius: 4, border: '1px solid #166534',
-  background: '#14532d40', color: '#4ade80', cursor: 'pointer',
+  width: 22, height: 22, borderRadius: 4, border: `1px solid rgba(52,211,153,0.3)`,
+  background: C.greenSubtle, color: C.green, cursor: 'pointer',
 }
 const rejectBtn: React.CSSProperties = {
-  ...acceptBtn,
-  border: '1px solid #7f1d1d', background: '#7f1d1d40', color: '#f87171',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  width: 22, height: 22, borderRadius: 4, border: `1px solid rgba(248,113,113,0.3)`,
+  background: C.redSubtle, color: C.red, cursor: 'pointer',
+}
+const editBtn: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  width: 22, height: 22, borderRadius: 4, border: `1px solid rgba(96,165,250,0.3)`,
+  background: C.blueSubtle, color: C.blue, cursor: 'pointer',
 }
 const acceptAllBtn: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px',
-  borderRadius: 5, border: '1px solid #166534', background: '#14532d40',
-  color: '#4ade80', fontSize: 11, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', gap: 4, padding: '4px 9px',
+  borderRadius: 5, border: `1px solid rgba(52,211,153,0.3)`, background: C.greenSubtle,
+  color: C.green, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
 }
 const rejectAllBtn: React.CSSProperties = {
-  ...acceptAllBtn,
-  border: '1px solid #7f1d1d', background: '#7f1d1d40', color: '#f87171',
+  display: 'flex', alignItems: 'center', gap: 4, padding: '4px 9px',
+  borderRadius: 5, border: `1px solid rgba(248,113,113,0.3)`, background: C.redSubtle,
+  color: C.red, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
 }
 const alternateBtn: React.CSSProperties = {
-  ...acceptAllBtn,
-  border: '1px solid #1d4ed8', background: '#1d4ed840', color: '#93c5fd',
+  display: 'flex', alignItems: 'center', gap: 4, padding: '4px 9px',
+  borderRadius: 5, border: `1px solid rgba(96,165,250,0.3)`, background: C.blueSubtle,
+  color: C.blue, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
 }
 const chevronBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', background: 'none',
-  border: 'none', color: '#6b7280', cursor: 'pointer', padding: 2,
+  border: 'none', color: C.textMuted, cursor: 'pointer', padding: 2,
 }

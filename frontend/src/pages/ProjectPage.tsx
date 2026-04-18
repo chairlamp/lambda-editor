@@ -7,6 +7,8 @@ import {
 import { projectsApi, docsApi } from '../services/api'
 import { ProjectSocket } from '../services/socket'
 import { useStore, Document, Project } from '../store/useStore'
+import { C } from '../design'
+import ThemeToggle from '../components/ThemeToggle'
 
 interface Member {
   user_id: string
@@ -171,28 +173,29 @@ export default function ProjectPage() {
   const canEdit = currentProject?.my_role !== 'viewer'
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0f0f23', color: '#e2e8f0' }}>
+    <div style={{ minHeight: '100vh', background: C.bgBase, color: C.textPrimary }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '14px 28px', background: '#16213e', borderBottom: '1px solid #1e1e3a',
+        padding: '14px 28px', background: C.bgRaised, borderBottom: `1px solid ${C.border}`,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button onClick={() => navigate('/projects')} style={ghostBtn}>
             <ArrowLeft size={14} />
           </button>
-          <span style={{ fontSize: 18, fontWeight: 700, color: '#c7d2fe' }}>
+          <span style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary }}>
             {currentProject?.title ?? '…'}
           </span>
           {currentProject && (
             <span style={{
               fontSize: 11, padding: '2px 8px', borderRadius: 10,
-              background: '#1e1e3a', color: roleColor(currentProject.my_role),
+              background: C.bgActive, color: roleColor(currentProject.my_role),
             }}>
               {currentProject.my_role}
             </span>
           )}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <ThemeToggle compact />
           {isOwner && (
             <button onClick={openInvitePanel} style={ghostBtn} title="Manage invite links">
               <Link size={14} /> Invite links
@@ -200,7 +203,7 @@ export default function ProjectPage() {
           )}
           <button
             onClick={() => setShowMembers((v) => !v)}
-            style={{ ...ghostBtn, background: showMembers ? '#1e1e3a' : undefined }}
+            style={{ ...ghostBtn, background: showMembers ? C.bgActive : undefined }}
           >
             <Users size={14} /> Members ({members.length})
           </button>
@@ -226,7 +229,7 @@ export default function ProjectPage() {
       <div style={{ display: 'flex', height: 'calc(100vh - 53px)' }}>
         <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
           {currentProject?.description && (
-            <p style={{ color: '#6b7280', fontSize: 13, marginBottom: 20 }}>
+            <p style={{ color: C.textSecondary, fontSize: 13, marginBottom: 20 }}>
               {currentProject.description}
             </p>
           )}
@@ -248,12 +251,12 @@ export default function ProjectPage() {
             </div>
           )}
 
-          {error && <div style={{ color: '#fca5a5', fontSize: 13, marginBottom: 12 }}>{error}</div>}
+          {error && <div style={{ color: C.red, fontSize: 13, marginBottom: 12 }}>{error}</div>}
 
           {loadingDocs ? (
-            <div style={{ color: '#4a4a6a' }}>Loading…</div>
+            <div style={{ color: C.textMuted }}>Loading…</div>
           ) : documents.length === 0 ? (
-            <div style={{ color: '#4a4a6a', marginTop: 40, textAlign: 'center' }}>
+            <div style={{ color: C.textMuted, marginTop: 40, textAlign: 'center' }}>
               No documents yet.{canEdit ? ' Create one to get started.' : ''}
             </div>
           ) : (
@@ -267,25 +270,25 @@ export default function ProjectPage() {
                     transition: 'border-color 0.15s',
                   }}
                   onClick={() => navigate(`/projects/${projectId}/docs/${doc.id}`)}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#4f46e5')}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#1e1e3a')}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = C.accent)}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = C.border)}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <FileText size={16} color="#818cf8" />
+                    <FileText size={16} color={C.accent} />
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>{doc.title}</div>
-                      <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{doc.path}</div>
+                      <div style={{ fontSize: 11, color: C.textSecondary, marginTop: 2 }}>{doc.path}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
                         <span style={{
                           fontSize: 10, padding: '2px 6px', borderRadius: 999,
-                          background: doc.kind === 'latex' ? '#312e81' : '#164e63',
-                          color: doc.kind === 'latex' ? '#c7d2fe' : '#a5f3fc',
+                          background: doc.kind === 'latex' ? C.accentSubtle : C.blueSubtle,
+                          color: doc.kind === 'latex' ? C.accent : C.blue,
                           textTransform: 'uppercase', letterSpacing: 0.4,
                         }}>
                           {doc.kind}
                         </span>
                       {doc.updated_at && (
-                        <div style={{ fontSize: 11, color: '#4a4a6a' }}>
+                        <div style={{ fontSize: 11, color: C.textMuted }}>
                           Updated {new Date(doc.updated_at).toLocaleDateString()}
                         </div>
                       )}
@@ -295,7 +298,7 @@ export default function ProjectPage() {
                   {canEdit && (
                     <button
                       onClick={(e) => { e.stopPropagation(); deleteDoc(doc.id) }}
-                      style={{ ...iconBtn, color: '#f87171' }}
+                      style={{ ...iconBtn, color: C.red }}
                     >
                       <Trash2 size={13} />
                     </button>
@@ -308,25 +311,25 @@ export default function ProjectPage() {
 
         {showMembers && (
           <div style={{
-            width: 300, borderLeft: '1px solid #1e1e3a', padding: '20px 16px',
-            background: '#12122a', overflow: 'auto',
+            width: 300, borderLeft: `1px solid ${C.border}`, padding: '20px 16px',
+            background: C.bgSurface, overflow: 'auto',
           }}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#c7d2fe', marginBottom: 16 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary, marginBottom: 16 }}>
               Members
             </h3>
             {members.map((m) => (
               <div key={m.user_id} style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '8px 0', borderBottom: '1px solid #1e1e3a',
+                padding: '8px 0', borderBottom: `1px solid ${C.border}`,
               }}>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>
                     {m.username}
                     {m.user_id === user?.id && (
-                      <span style={{ color: '#6b7280', fontWeight: 400 }}> (you)</span>
+                      <span style={{ color: C.textSecondary, fontWeight: 400 }}> (you)</span>
                     )}
                   </div>
-                  <div style={{ fontSize: 11, color: '#6b7280' }}>{m.email}</div>
+                  <div style={{ fontSize: 11, color: C.textSecondary }}>{m.email}</div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   {isOwner && m.user_id !== user?.id ? (
@@ -334,7 +337,7 @@ export default function ProjectPage() {
                       value={m.role}
                       onChange={(e) => updateRole(m.user_id, e.target.value)}
                       style={{
-                        background: '#1e1e3a', border: '1px solid #2a2a4a', borderRadius: 4,
+                        background: C.bgActive, border: `1px solid ${C.border}`, borderRadius: 4,
                         color: roleColor(m.role), fontSize: 11, padding: '2px 6px', cursor: 'pointer',
                       }}
                     >
@@ -345,7 +348,7 @@ export default function ProjectPage() {
                   ) : (
                     <span style={{
                       fontSize: 11, padding: '2px 8px', borderRadius: 10,
-                      background: '#1e1e3a', color: roleColor(m.role),
+                      background: C.bgActive, color: roleColor(m.role),
                       display: 'flex', alignItems: 'center', gap: 4,
                     }}>
                       {m.role === 'owner' ? <Crown size={10} /> : m.role === 'editor' ? <Edit3 size={10} /> : <Eye size={10} />}
@@ -353,7 +356,7 @@ export default function ProjectPage() {
                     </span>
                   )}
                   {isOwner && m.user_id !== user?.id && m.role !== 'owner' && (
-                    <button onClick={() => removeMember(m.user_id)} style={{ ...iconBtn, color: '#f87171' }}>
+                    <button onClick={() => removeMember(m.user_id)} style={{ ...iconBtn, color: C.red }}>
                       <Trash2 size={11} />
                     </button>
                   )}
@@ -370,11 +373,11 @@ export default function ProjectPage() {
           display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
         }} onClick={() => setShowInvitePanel(false)}>
           <div style={{
-            background: '#16213e', border: '1px solid #2a2a4a', borderRadius: 12,
+            background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 12,
             padding: 24, width: 440, maxWidth: '90vw',
           }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-              <h3 style={{ fontSize: 15, fontWeight: 700, color: '#c7d2fe', margin: 0 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary, margin: 0 }}>
                 Invite links
               </h3>
               <button onClick={() => setShowInvitePanel(false)} style={iconBtn}>
@@ -384,39 +387,39 @@ export default function ProjectPage() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
               {invites.length === 0 && (
-                <div style={{ color: '#4a4a6a', fontSize: 13, textAlign: 'center', padding: '12px 0' }}>
+                <div style={{ color: C.textMuted, fontSize: 13, textAlign: 'center', padding: '12px 0' }}>
                   No invite links yet
                 </div>
               )}
               {invites.map((inv) => (
                 <div key={inv.id} style={{
-                  background: '#0f0f23', border: '1px solid #1e1e3a', borderRadius: 8,
+                  background: C.bgBase, border: `1px solid ${C.border}`, borderRadius: 8,
                   padding: '10px 14px',
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{
                         fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 600,
-                        background: inv.role === 'editor' ? '#1a2a1a' : '#1a1a2a',
-                        color: inv.role === 'editor' ? '#4ade80' : '#9ca3af',
+                        background: inv.role === 'editor' ? C.greenSubtle : C.bgActive,
+                        color: inv.role === 'editor' ? C.green : C.textSecondary,
                       }}>
                         {inv.role}
                       </span>
                       {inv.label && (
-                        <span style={{ fontSize: 12, color: '#9ca3af' }}>{inv.label}</span>
+                        <span style={{ fontSize: 12, color: C.textSecondary }}>{inv.label}</span>
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button onClick={() => copyInviteLink(inv)} style={iconBtn} title="Copy link">
-                        {copiedId === inv.id ? <Check size={13} color="#4ade80" /> : <Copy size={13} />}
+                        {copiedId === inv.id ? <Check size={13} color={C.green} /> : <Copy size={13} />}
                       </button>
-                      <button onClick={() => deleteInvite(inv.id)} style={{ ...iconBtn, color: '#f87171' }} title="Delete">
+                      <button onClick={() => deleteInvite(inv.id)} style={{ ...iconBtn, color: C.red }} title="Delete">
                         <Trash2 size={13} />
                       </button>
                     </div>
                   </div>
                   <div style={{
-                    fontSize: 11, color: '#4a4a6a', fontFamily: 'monospace',
+                    fontSize: 11, color: C.textMuted, fontFamily: 'monospace',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>
                     {window.location.origin}/join/{inv.token}
@@ -426,8 +429,8 @@ export default function ProjectPage() {
             </div>
 
             {invites.length < 3 ? (
-              <div style={{ borderTop: '1px solid #1e1e3a', paddingTop: 16 }}>
-                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
+              <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
+                <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 10 }}>
                   New invite link ({invites.length}/3)
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
@@ -435,8 +438,8 @@ export default function ProjectPage() {
                     value={newInviteRole}
                     onChange={(e) => setNewInviteRole(e.target.value as 'editor' | 'viewer')}
                     style={{
-                      background: '#0f0f23', border: '1px solid #2a2a4a', borderRadius: 6,
-                      color: '#e2e8f0', fontSize: 13, padding: '6px 10px', cursor: 'pointer',
+                      background: C.bgBase, border: `1px solid ${C.border}`, borderRadius: 6,
+                      color: C.textPrimary, fontSize: 13, padding: '6px 10px', cursor: 'pointer',
                     }}
                   >
                     <option value="editor">editor</option>
@@ -455,7 +458,7 @@ export default function ProjectPage() {
                 </button>
               </div>
             ) : (
-              <div style={{ borderTop: '1px solid #1e1e3a', paddingTop: 16, textAlign: 'center', color: '#6b7280', fontSize: 13 }}>
+              <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16, textAlign: 'center', color: C.textSecondary, fontSize: 13 }}>
                 Maximum 3 invite links reached
               </div>
             )}
@@ -467,28 +470,28 @@ export default function ProjectPage() {
 }
 
 function roleColor(role: string) {
-  return role === 'owner' ? '#fbbf24' : role === 'editor' ? '#4ade80' : '#9ca3af'
+  return role === 'owner' ? C.yellow : role === 'editor' ? C.green : C.textSecondary
 }
 
 const card: React.CSSProperties = {
-  background: '#16213e', border: '1px solid #1e1e3a', borderRadius: 10, padding: '14px 18px',
+  background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 10, padding: '14px 18px',
 }
 const inputStyle: React.CSSProperties = {
-  width: '100%', background: '#0f0f23', border: '1px solid #2a2a4a', borderRadius: 6,
-  padding: '8px 12px', color: '#e2e8f0', fontSize: 13, outline: 'none', boxSizing: 'border-box',
+  width: '100%', background: C.bgBase, border: `1px solid ${C.border}`, borderRadius: 6,
+  padding: '8px 12px', color: C.textPrimary, fontSize: 13, outline: 'none', boxSizing: 'border-box',
 }
 const primaryBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
-  borderRadius: 6, border: 'none', background: '#4f46e5', color: '#fff',
+  borderRadius: 6, border: 'none', background: C.accent, color: '#fff',
   fontSize: 13, cursor: 'pointer', fontWeight: 600,
 }
 const ghostBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px',
-  borderRadius: 6, border: '1px solid #2a2a4a', background: 'transparent',
-  color: '#9ca3af', fontSize: 13, cursor: 'pointer',
+  borderRadius: 6, border: `1px solid ${C.border}`, background: 'transparent',
+  color: C.textSecondary, fontSize: 13, cursor: 'pointer',
 }
 const iconBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
-  width: 26, height: 26, borderRadius: 5, border: '1px solid #2a2a4a',
-  background: 'transparent', color: '#9ca3af', cursor: 'pointer',
+  width: 26, height: 26, borderRadius: 5, border: `1px solid ${C.border}`,
+  background: 'transparent', color: C.textSecondary, cursor: 'pointer',
 }
