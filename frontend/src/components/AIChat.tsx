@@ -2,12 +2,13 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Bot, Loader2, RefreshCw, AlignLeft,
   X, FileText, MapPin,
-  ArrowRight,
+  ArrowRight, Square,
 } from 'lucide-react'
 import { aiChatApi, streamAI } from '../services/api'
 import api from '../services/api'
 import { useStore } from '../store/useStore'
 import { RoomSocket } from '../services/socket'
+import { C } from '../design'
 import DiffView, { DiffChange } from './DiffView'
 import type { AIChatProps as Props, QuoteItem, EquationLocation, ActionRequest, ChatMessage, ActionType, ActiveAction } from './ai-chat/types'
 import { ACTION_DEFS, AVAILABLE_ACTIONS, genId, inferActionType, getActionPrompt, mapStoredMessage } from './ai-chat/constants'
@@ -48,7 +49,9 @@ export default function AIChat({
   // Track server action IDs separately so streamed updates can resume the right message.
   const streamingMsgRef = useRef(new Map<string, string>())
   const actionRequestRef = useRef(new Map<string, ActionRequest>())
-  const { currentDoc, updateDocContent, user } = useStore()
+  // AbortController for the active SSE stream so the user can stop generation.
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const { currentDoc, user } = useStore()
   const effectiveEquationLocation = equationLocation ?? pendingEquationLocation ?? null
   const canReviewDiffs = !readOnly
   const canInvokeAI = !readOnly
@@ -238,9 +241,9 @@ export default function AIChat({
             key={`${toolName}-${index}`}
             style={{
               fontSize: 10,
-              color: '#cbd5e1',
-              background: '#111827',
-              border: '1px solid #374151',
+              color: C.textPrimary,
+              background: C.bgSurface,
+              border: `1px solid ${C.borderStrong}`,
               borderRadius: 999,
               padding: '3px 7px',
               textTransform: 'lowercase',
@@ -253,20 +256,25 @@ export default function AIChat({
     )
   }
 
+  const stopGeneration = () => {
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+  }
+
   // Share chunks as they arrive so collaborators do not wait for the final response.
   const runStream = async (
     endpoint: string,
     payload: Record<string, unknown>,
     aid: string,
   ) => {
+    const controller = new AbortController()
+    abortControllerRef.current = controller
     const responseId = `${aid}-res`
     let started = false
-    let fullContent = ''
     await streamAI(
       endpoint,
       payload,
       (chunk) => {
-        fullContent += chunk
         if (!started) {
           started = true
           startStreamingMsg(responseId, chunk)
@@ -276,17 +284,19 @@ export default function AIChat({
         broadcast({ event: 'chunk', content: chunk, action_id: aid })
       },
       () => {
+        abortControllerRef.current = null
         finalizeMsg(responseId)
         broadcast({ event: 'done', action_id: aid })
       },
       (err) => {
+        abortControllerRef.current = null
         const errorChunk = `**Error:** ${err}`
-        fullContent += errorChunk
-        if (!started) startStreamingMsg(responseId, `**Error:** ${err}`)
+        if (!started) startStreamingMsg(responseId, errorChunk)
         else appendChunk(responseId, errorChunk)
         finalizeMsg(responseId)
         broadcast({ event: 'done', action_id: aid })
       },
+      controller.signal,
     )
   }
 
@@ -566,21 +576,35 @@ export default function AIChat({
   }, [canReviewDiffs, persistReviewState])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#12122a', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: C.bgSurface, fontFamily: 'system-ui, sans-serif' }}>
 
-      <div style={{ padding: '8px 12px', background: '#16213e', borderBottom: '1px solid #1e2a4a', flexShrink: 0 }}>
+      <div style={{ padding: '8px 12px', background: C.bgRaised, borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Bot size={15} color="#818cf8" />
-          <span style={{ fontWeight: 700, fontSize: 13, color: '#c7d2fe' }}>AI Assistant</span>
-          {loading && <Loader2 size={12} color="#818cf8" style={{ animation: 'spin 1s linear infinite', marginLeft: 4 }} />}
+          <Bot size={15} color={C.accent} />
+          <span style={{ fontWeight: 700, fontSize: 13, color: C.textPrimary }}>AI Assistant</span>
+          {loading && <Loader2 size={12} color={C.accent} style={{ animation: 'spin 1s linear infinite', marginLeft: 4 }} />}
           <div style={{ flex: 1 }} />
+          {loading && (
+            <button
+              onClick={stopGeneration}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                background: C.redSubtle, border: `1px solid ${C.red}`,
+                borderRadius: 5, color: C.red, fontSize: 11,
+                padding: '3px 8px', cursor: 'pointer',
+              }}
+              title="Stop generation"
+            >
+              <Square size={10} fill={C.red} /> Stop
+            </button>
+          )}
           {onClose && (
             <button onClick={onClose} style={closeBtnStyle} title="Close"><X size={12} /></button>
           )}
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '7px 10px', borderBottom: '1px solid #1e1e3a', flexShrink: 0 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '7px 10px', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
         {AVAILABLE_ACTIONS.map((type) => {
           const def = ACTION_DEFS[type]
           const active = activeAction?.type === type
@@ -591,7 +615,7 @@ export default function AIChat({
               style={{
                 ...chip,
                 color: def.color,
-                borderColor: active ? def.color : '#2a2a4a',
+                borderColor: active ? def.color : C.border,
                 background: active ? `${def.color}18` : 'transparent',
                 opacity: loading || !canInvokeAI ? 0.4 : 1,
                 cursor: loading || !canInvokeAI ? 'default' : 'pointer',
@@ -607,8 +631,8 @@ export default function AIChat({
       <div style={{ flex: 1, overflow: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {!aiDisclosureAccepted && canInvokeAI && (
           <div style={{
-            background: '#1f2a44', border: '1px solid #2f4f7f', borderRadius: 10,
-            padding: 12, color: '#dbeafe', fontSize: 12, lineHeight: 1.6,
+            background: C.blueSubtle, border: `1px solid ${C.blue}`, borderRadius: 10,
+            padding: 12, color: C.textPrimary, fontSize: 12, lineHeight: 1.6,
           }}>
             Selected document content may be sent to a third-party AI provider. By continuing, you confirm that AI requests should use only the selected content and necessary context unless you explicitly request broader scope.
             <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
@@ -617,7 +641,7 @@ export default function AIChat({
                   localStorage.setItem(disclosureKey, 'true')
                   setAiDisclosureAccepted(true)
                 }}
-                style={{ background: '#60a5fa', color: '#0f172a', border: 'none', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+                style={{ background: C.blue, color: '#fff', border: 'none', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
               >
                 I Understand
               </button>
@@ -625,7 +649,7 @@ export default function AIChat({
           </div>
         )}
         {messages.length === 0 && (
-          <div style={{ color: '#3a3a6a', fontSize: 12, textAlign: 'center', marginTop: 48, lineHeight: 1.8 }}>
+          <div style={{ color: C.textMuted, fontSize: 12, textAlign: 'center', marginTop: 48, lineHeight: 1.8 }}>
             {canInvokeAI ? 'Ask anything. Chat can now use web search, research, and translation tools.' : 'AI actions are unavailable in viewer mode.'}
           </div>
         )}
@@ -639,7 +663,7 @@ export default function AIChat({
             <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', gap: 3 }}>
               <span style={{
                 fontSize: 10, fontWeight: 600,
-                color: isUser ? '#818cf8' : '#4ade80',
+                color: isUser ? C.accent : C.green,
                 paddingLeft: isUser ? 0 : 2,
                 paddingRight: isUser ? 2 : 0,
               }}>
@@ -650,10 +674,10 @@ export default function AIChat({
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, maxWidth: '90%' }}>
                   {m.quotes && m.quotes.map((q, qi) => (
                     <div key={qi} style={quoteBlockStyle}>
-                      <div style={{ fontSize: 10, color: '#818cf8', marginBottom: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <div style={{ fontSize: 10, color: C.accent, marginBottom: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
                         <FileText size={9} /> {q.filename}:{q.lineStart}–{q.lineEnd}
                       </div>
-                      <pre style={{ fontSize: 11, color: '#9ca3af', margin: 0, fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>
+                      <pre style={{ fontSize: 11, color: C.textSecondary, margin: 0, fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>
                         {q.text.length > 150 ? q.text.slice(0, 150) + '…' : q.text}
                       </pre>
                     </div>
@@ -673,7 +697,7 @@ export default function AIChat({
                           {ACTION_DEFS[messageActionType].icon}
                         </span>
                         {m.actionPrompt && (
-                          <span style={{ fontSize: 12, color: '#dbeafe', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontSize: 12, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {m.actionPrompt}
                           </span>
                         )}
@@ -723,9 +747,9 @@ export default function AIChat({
                           rel="noreferrer"
                           style={{
                             fontSize: 11,
-                            color: '#93c5fd',
-                            background: '#172033',
-                            border: '1px solid #274060',
+                            color: C.blue,
+                            background: C.blueSubtle,
+                            border: `1px solid ${C.border}`,
                             borderRadius: 999,
                             padding: '4px 8px',
                             textDecoration: 'none',
@@ -749,20 +773,20 @@ export default function AIChat({
         <div ref={bottomRef} />
       </div>
 
-      <div style={{ padding: '8px 10px', borderTop: '1px solid #1e1e3a', flexShrink: 0 }}>
+      <div style={{ padding: '8px 10px', borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
         {quotes.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
             {quotes.map((q, i) => (
               <div key={i} style={{
                 display: 'flex', alignItems: 'center', gap: 5,
-                background: '#1e1e3a', border: '1px solid #4f46e5', borderRadius: 6,
-                padding: '3px 8px', fontSize: 11, color: '#818cf8',
+                background: C.accentSubtle, border: `1px solid ${C.accentBorder}`, borderRadius: 6,
+                padding: '3px 8px', fontSize: 11, color: C.accent,
               }}>
                 <FileText size={9} />
                 {q.filename}:{q.lineStart}–{q.lineEnd}
                 <button
                   onClick={() => setQuotes((prev) => prev.filter((_, j) => j !== i))}
-                  style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', padding: 0, display: 'flex', marginLeft: 2 }}
+                  style={{ background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer', padding: 0, display: 'flex', marginLeft: 2 }}
                 >
                   <X size={10} />
                 </button>
@@ -771,29 +795,29 @@ export default function AIChat({
           </div>
         )}
         <div style={{
-          background: '#1a1a35',
-          border: `1px solid ${activeAction ? activeAction.color + '60' : retryAction ? ACTION_DEFS[retryAction.type].color + '60' : '#2a2a4a'}`,
+          background: C.bgCard,
+          border: `1px solid ${activeAction ? activeAction.color + '60' : retryAction ? ACTION_DEFS[retryAction.type].color + '60' : C.border}`,
           borderRadius: 8, overflow: 'hidden',
         }}>
           {retryAction && !activeAction && (
-            <div style={{ borderBottom: '1px solid #2a2a4a' }}>
+            <div style={{ borderBottom: `1px solid ${C.border}` }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px 4px' }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: ACTION_DEFS[retryAction.type].color, fontSize: 11, fontWeight: 600 }}>
                   <ArrowRight size={11} /> Continue
                 </span>
-                <span style={{ fontSize: 11, color: '#6b7280' }}>
+                <span style={{ fontSize: 11, color: C.textMuted }}>
                   {ACTION_DEFS[retryAction.type].label}
                 </span>
                 <div style={{ flex: 1 }} />
                 <button onClick={() => setRetryAction(null)}
-                  style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', padding: 0, display: 'flex' }}>
+                  style={{ background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer', padding: 0, display: 'flex' }}>
                   <X size={11} />
                 </button>
               </div>
             </div>
           )}
           {activeAction && (
-            <div style={{ borderBottom: '1px solid #2a2a4a' }}>
+            <div style={{ borderBottom: `1px solid ${C.border}` }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px 4px' }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: activeAction.color, fontSize: 11, fontWeight: 600 }}>
                   {activeAction.icon} {activeAction.label}
@@ -805,19 +829,19 @@ export default function AIChat({
                   setEquationLocation(null)
                   onCancelEquationLocation?.()
                 }}
-                  style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', padding: 0, display: 'flex' }}>
+                  style={{ background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer', padding: 0, display: 'flex' }}>
                   <X size={11} />
                 </button>
               </div>
               {activeAction.type === 'equation' && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px 6px' }}>
-                  <MapPin size={10} color="#fbbf24" style={{ flexShrink: 0 }} />
+                  <MapPin size={10} color={C.yellow} style={{ flexShrink: 0 }} />
                   {effectiveEquationLocation ? (
                     <>
-                      <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 600, flexShrink: 0 }}>
+                      <span style={{ fontSize: 11, color: C.yellow, fontWeight: 600, flexShrink: 0 }}>
                         Line {effectiveEquationLocation.line}
                       </span>
-                      <span style={{ fontSize: 11, color: '#9ca3af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                      <span style={{ fontSize: 11, color: C.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                         {(() => {
                           const displayText = effectiveEquationLocation.text.trim() || '(empty line)'
                           return displayText.length > 36 ? displayText.slice(0, 36) + '…' : displayText
@@ -829,7 +853,7 @@ export default function AIChat({
                           onRequestEquationLocation?.()
                         }}
                         title="Pick a different location"
-                        style={{ background: 'none', border: 'none', color: '#fbbf24', cursor: 'pointer', padding: 0, display: 'flex', flexShrink: 0 }}
+                        style={{ background: 'none', border: 'none', color: C.yellow, cursor: 'pointer', padding: 0, display: 'flex', flexShrink: 0 }}
                       >
                         <RefreshCw size={10} />
                       </button>
@@ -838,19 +862,19 @@ export default function AIChat({
                           setEquationLocation(null)
                           onCancelEquationLocation?.()
                         }}
-                        style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', padding: 0, display: 'flex', flexShrink: 0 }}
+                        style={{ background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer', padding: 0, display: 'flex', flexShrink: 0 }}
                       >
                         <X size={10} />
                       </button>
                     </>
                   ) : isPickingEquationLocation ? (
                     <>
-                      <span style={{ fontSize: 11, color: '#fde68a', flex: 1 }}>
+                      <span style={{ fontSize: 11, color: C.yellow, flex: 1 }}>
                         Click a line in the editor to place the equation
                       </span>
                       <button
                         onClick={() => onCancelEquationLocation?.()}
-                        style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', padding: 0, display: 'flex', flexShrink: 0 }}
+                        style={{ background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer', padding: 0, display: 'flex', flexShrink: 0 }}
                       >
                         <X size={10} />
                       </button>
@@ -860,17 +884,17 @@ export default function AIChat({
                       onClick={() => onRequestEquationLocation?.()}
                       style={{
                         background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                        fontSize: 11, color: '#fbbf2499', display: 'flex', alignItems: 'center', gap: 4,
+                        fontSize: 11, color: C.yellow, display: 'flex', alignItems: 'center', gap: 4,
                         textDecoration: 'underline dotted',
                       }}
                     >
-                      Click in the editor to set insertion point <span style={{ color: '#f87171' }}>*</span>
+                      Click in the editor to set insertion point <span style={{ color: C.red }}>*</span>
                     </button>
                   )}
                 </div>
               )}
               {activeAction.type === 'translate' && (
-                <div style={{ padding: '0 10px 6px', fontSize: 11, color: selectedTextFromQuotes(quotes) ? '#86efac' : '#fca5a5' }}>
+                <div style={{ padding: '0 10px 6px', fontSize: 11, color: selectedTextFromQuotes(quotes) ? C.green : C.red }}>
                   {selectedTextFromQuotes(quotes)
                     ? 'Selected passage ready. Enter the target language.'
                     : 'Quote a passage from the editor first, then enter the target language.'}

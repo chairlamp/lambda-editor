@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
+from typing import List, Literal
 
 
 class Settings(BaseSettings):
@@ -8,13 +8,22 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me"
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/lambda_editor"
     REDIS_URL: str = "redis://localhost:6379/0"
-    SESSION_COOKIE_NAME: str = "lambda_session"
-    SESSION_TTL_SECONDS: int = 60 * 60 * 24 * 7
-    SESSION_COOKIE_SECURE: bool = False
+    USE_FAKE_REDIS: bool = False
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_COOKIE_NAME: str = "lambda_access_token"
+    REFRESH_TOKEN_COOKIE_NAME: str = "lambda_refresh_token"
+    ACCESS_TOKEN_TTL_SECONDS: int = 60 * 15
+    REFRESH_TOKEN_TTL_SECONDS: int = 60 * 60 * 24 * 7
+    AUTH_COOKIE_SECURE: bool = False
+    AUTH_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
 
+    LLM_PROVIDER: str = "openai"
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "openai/gpt-oss-20b"
+    GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
     GOOGLE_TRANSLATE_API_URL: str = "https://translation.googleapis.com/language/translate/v2"
     GOOGLE_TRANSLATE_API_KEY: str = ""
     GOOGLE_TRANSLATE_SOURCE_LANGUAGE: str = "auto"
@@ -25,5 +34,34 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",")]
+
+    @property
+    def llm_provider(self) -> str:
+        provider = (self.LLM_PROVIDER or "openai").strip().lower()
+        return provider if provider in {"openai", "groq", "fake"} else "openai"
+
+    @property
+    def llm_api_key(self) -> str:
+        if self.llm_provider == "fake":
+            return ""
+        return self.GROQ_API_KEY if self.llm_provider == "groq" else self.OPENAI_API_KEY
+
+    @property
+    def llm_model(self) -> str:
+        if self.llm_provider == "fake":
+            return "fake-llm"
+        return self.GROQ_MODEL if self.llm_provider == "groq" else self.OPENAI_MODEL
+
+    @property
+    def llm_base_url(self) -> str:
+        if self.llm_provider == "fake":
+            return ""
+        return self.GROQ_BASE_URL if self.llm_provider == "groq" else self.OPENAI_BASE_URL
+
+    @property
+    def llm_api_key_env_name(self) -> str:
+        if self.llm_provider == "fake":
+            return "N/A"
+        return "GROQ_API_KEY" if self.llm_provider == "groq" else "OPENAI_API_KEY"
 
 settings = Settings()

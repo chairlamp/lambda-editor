@@ -8,34 +8,9 @@ from typing import Any, Optional
 import httpx
 
 from app.config import settings
+from app.services.prompts import AGENT_SYSTEM_PROMPT, RESEARCH_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
-
-AGENT_SYSTEM_PROMPT = """You are Lambda's AI research assistant inside a collaborative LaTeX editor.
-
-You are no longer limited to plain text generation. You can use tools when they improve accuracy.
-
-Use tools in these cases:
-- Use web search for fresh facts, current references, or anything likely to have changed.
-- Use research_topic for deeper research synthesis, especially for LaTeX, academic, technical, or documentation questions.
-- Use translate_text when the user asks for translation or when preserving LaTeX commands exactly matters.
-
-Rules:
-- Prefer tool use over guessing whenever correctness matters.
-- When translating, preserve LaTeX commands, environments, citations, labels, refs, and math exactly.
-- Keep responses concise but useful.
-- If sources were used, rely on them rather than unsupported claims.
-"""
-
-RESEARCH_SYSTEM_PROMPT = """You are a focused research tool.
-
-Produce a concise research brief with:
-- a short answer
-- 2 to 5 key points
-- source-backed claims only
-
-Prefer primary or authoritative sources. For LaTeX/documentation topics, prefer Overleaf, CTAN, LaTeX Project, TeX FAQ, and TUG.
-"""
 
 LANGUAGE_CODE_MAP = {
     "arabic": "ar",
@@ -74,6 +49,23 @@ def _build_user_input(prompt: str, document_context: str = "") -> list[dict[str,
     }]
 
 
+def _search_tool_type() -> str:
+    return "browser_search" if settings.llm_provider == "groq" else "web_search"
+
+
+def _function_tool(
+    name: str,
+    description: str,
+    parameters: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "name": name,
+        "description": description,
+        "parameters": parameters,
+    }
+
+
 def _normalize_sources(raw_sources: list[dict[str, Any]]) -> list[dict[str, str]]:
     seen: set[str] = set()
     sources: list[dict[str, str]] = []
@@ -100,8 +92,10 @@ def _extract_text_and_sources(response_json: dict[str, Any]) -> tuple[str, list[
             name = item.get("name")
             if isinstance(name, str) and name not in tools_used:
                 tools_used.append(name)
-        elif item_type == "web_search_call" and "web_search" not in tools_used:
-            tools_used.append("web_search")
+        elif item_type in {"web_search_call", "browser_search_call"}:
+            tool_name = "browser_search" if item_type == "browser_search_call" else "web_search"
+            if tool_name not in tools_used:
+                tools_used.append(tool_name)
 
         for part in item.get("content", []) or []:
             part_type = part.get("type")
@@ -182,22 +176,43 @@ def _detect_translation_request(prompt: str) -> Optional[dict[str, str]]:
 
 
 async def _responses_create(payload: dict[str, Any]) -> dict[str, Any]:
-    if not settings.OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY is not configured.")
+    if not settings.llm_api_key:
+        raise RuntimeError(f"{settings.llm_api_key_env_name} is not configured.")
 
     async with httpx.AsyncClient(timeout=90.0) as http:
         response = await http.post(
-            f"{settings.OPENAI_BASE_URL.rstrip('/')}/responses",
+            f"{settings.llm_base_url.rstrip('/')}/responses",
             headers={
-                "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                "Authorization": f"Bearer {settings.llm_api_key}",
                 "Content-Type": "application/json",
             },
             json=payload,
         )
     if response.status_code >= 400:
         detail = response.text.strip()
-        raise RuntimeError(detail or f"OpenAI request failed with status {response.status_code}.")
+        raise RuntimeError(detail or f"{settings.llm_provider.title()} request failed with status {response.status_code}.")
     return response.json()
+
+
+def _tool_outputs_follow_up_input(
+    prompt: str,
+    document_context: str,
+    tool_outputs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rendered_outputs: list[str] = []
+    for output in tool_outputs:
+        try:
+            parsed = json.loads(str(output.get("output") or "{}"))
+        except json.JSONDecodeError:
+            parsed = {"raw": output.get("output")}
+        rendered_outputs.append(json.dumps(parsed, ensure_ascii=True, indent=2))
+
+    follow_up = (
+        "Continue answering the user's request using the following tool results.\n\n"
+        f"Original request:\n{prompt.strip()}\n\n"
+        f"Tool results:\n{chr(10).join(rendered_outputs)}"
+    )
+    return _build_user_input(follow_up, document_context)
 
 
 async def _research_topic(query: str, focus: str = "") -> dict[str, Any]:
@@ -208,13 +223,13 @@ async def _research_topic(query: str, focus: str = "") -> dict[str, Any]:
     logger.info("agent tool call: research_topic query=%r focus=%r", query.strip(), focus.strip())
 
     response_json = await _responses_create({
-        "model": settings.OPENAI_MODEL,
+        "model": settings.llm_model,
         "instructions": RESEARCH_SYSTEM_PROMPT,
         "input": [{
             "role": "user",
             "content": [{"type": "input_text", "text": research_prompt}],
         }],
-        "tools": [{"type": "web_search"}],
+        "tools": [{"type": _search_tool_type()}],
     })
     content, sources, _ = _extract_text_and_sources(response_json)
     logger.info("agent tool result: research_topic sources=%d chars=%d", len(sources), len(content))
@@ -344,13 +359,15 @@ async def run_tool_enabled_chat(prompt: str, document_context: str = "") -> dict
             "tools_used": ["translate_text"],
         }
 
-    tools: list[dict[str, Any]] = [
-        {"type": "web_search"},
-        {
-            "type": "function",
-            "name": "research_topic",
-            "description": "Research a topic and return a short source-backed brief. Use this for documentation lookup, LaTeX references, academic research, or technical synthesis.",
-            "parameters": {
+    tools: list[dict[str, Any]] = []
+    if settings.llm_provider != "groq":
+        tools.append({"type": "web_search"})
+
+    tools.extend([
+        _function_tool(
+            "research_topic",
+            "Research a topic and return a short source-backed brief. Use this for documentation lookup, LaTeX references, academic research, or technical synthesis.",
+            {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "What to research."},
@@ -359,12 +376,11 @@ async def run_tool_enabled_chat(prompt: str, document_context: str = "") -> dict
                 "required": ["query"],
                 "additionalProperties": False,
             },
-        },
-        {
-            "type": "function",
-            "name": "translate_text",
-            "description": "Translate text with Google Cloud Translation while preserving LaTeX commands and formatting exactly. Use ISO language codes like es, fr, de, kk, ru, zh-CN.",
-            "parameters": {
+        ),
+        _function_tool(
+            "translate_text",
+            "Translate text with Google Cloud Translation while preserving LaTeX commands and formatting exactly. Use ISO language codes like es, fr, de, kk, ru, or zh-CN.",
+            {
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "The text to translate."},
@@ -373,11 +389,11 @@ async def run_tool_enabled_chat(prompt: str, document_context: str = "") -> dict
                 "required": ["text", "target_language"],
                 "additionalProperties": False,
             },
-        },
-    ]
+        ),
+    ])
 
     payload: dict[str, Any] = {
-        "model": settings.OPENAI_MODEL,
+        "model": settings.llm_model,
         "instructions": AGENT_SYSTEM_PROMPT,
         "input": _build_user_input(prompt, document_context),
         "tools": tools,
@@ -430,13 +446,20 @@ async def run_tool_enabled_chat(prompt: str, document_context: str = "") -> dict
                 "output": json.dumps(result, ensure_ascii=True),
             })
 
-        response_json = await _responses_create({
-            "model": settings.OPENAI_MODEL,
-            "instructions": AGENT_SYSTEM_PROMPT,
-            "previous_response_id": response_json.get("id"),
-            "input": tool_outputs,
-            "tools": tools,
-        })
+        if settings.llm_provider == "groq":
+            response_json = await _responses_create({
+                "model": settings.llm_model,
+                "instructions": AGENT_SYSTEM_PROMPT,
+                "input": _tool_outputs_follow_up_input(prompt, document_context, tool_outputs),
+            })
+        else:
+            response_json = await _responses_create({
+                "model": settings.llm_model,
+                "instructions": AGENT_SYSTEM_PROMPT,
+                "previous_response_id": response_json.get("id"),
+                "input": tool_outputs,
+                "tools": tools,
+            })
         content, response_sources, response_tools = _extract_text_and_sources(response_json)
         sources = _normalize_sources(sources + response_sources)
         for tool_name in response_tools:

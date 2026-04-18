@@ -33,8 +33,8 @@ This is Lambda. My team's project for AI1220: a remake of Overleaf with AI featu
 | --- | --- |
 | Frontend | React 18, TypeScript, Vite, Zustand, Monaco Editor |
 | Backend | FastAPI, SQLAlchemy async, PostgreSQL, WebSockets |
-| AI | OpenAI Responses API for tool-enabled chat, OpenAI streaming for rewrite/generation actions, Google Cloud Translation API for translation tool calls |
-| Auth | Redis-backed server-side sessions with HTTP-only cookies |
+| AI | Configurable OpenAI-compatible provider (`OpenAI` or `Groq`) for chat/generation, plus Google Cloud Translation API for translation tool calls |
+| Auth | JWT access/refresh tokens delivered via HTTP-only cookies, with Redis-backed refresh-token rotation |
 | Collaboration | Yjs CRDT (`pycrdt` on server, `y-websocket` + `y-monaco` on client), Redis-backed CRDT state/pub-sub, Redis pub/sub for presence and project events |
 | Output | Rendered export to `PDF`, `DVI`, and `PS` via `pdflatex`, `xelatex`, `lualatex`, or `tectonic` |
 | Default storage | PostgreSQL via `postgresql+asyncpg` |
@@ -49,11 +49,11 @@ Before starting the app, make sure you have:
 - `Node.js` 18+ and `npm`
 - `Docker` for the default local PostgreSQL and Redis setup used by `start.sh`
 - A LaTeX compiler such as `pdflatex`, `xelatex`, `lualatex`, or `tectonic`
-- An OpenAI API key if you want AI features enabled
+- An OpenAI or Groq API key if you want AI features enabled
 - A Google Cloud Translation API key if you want the translation tool enabled
 
 > **Note**
-> The editor itself can run without AI, but AI endpoints require `OPENAI_API_KEY` to be configured.
+> The editor itself can run without AI, but AI endpoints require the provider-specific API key to be configured (`OPENAI_API_KEY` for `openai`, `GROQ_API_KEY` for `groq`).
 
 ### 1. Backend setup
 
@@ -71,16 +71,33 @@ Update `backend/.env` with your values:
 SECRET_KEY=your-secret-key-change-in-production
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/lambda_editor
 REDIS_URL=redis://localhost:6379/0
-SESSION_COOKIE_NAME=lambda_session
-SESSION_TTL_SECONDS=604800
-SESSION_COOKIE_SECURE=false
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_COOKIE_NAME=lambda_access_token
+REFRESH_TOKEN_COOKIE_NAME=lambda_refresh_token
+ACCESS_TOKEN_TTL_SECONDS=900
+REFRESH_TOKEN_TTL_SECONDS=604800
+AUTH_COOKIE_SECURE=false
+AUTH_COOKIE_SAMESITE=lax
+LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o
 OPENAI_BASE_URL=https://api.openai.com/v1
+GROQ_API_KEY=
+GROQ_MODEL=openai/gpt-oss-20b
+GROQ_BASE_URL=https://api.groq.com/openai/v1
 GOOGLE_TRANSLATE_API_URL=https://translation.googleapis.com/language/translate/v2
 GOOGLE_TRANSLATE_API_KEY=
 GOOGLE_TRANSLATE_SOURCE_LANGUAGE=auto
 CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+```
+
+To use Groq instead of OpenAI, set:
+
+```env
+LLM_PROVIDER=groq
+GROQ_API_KEY=gsk_...
+GROQ_MODEL=openai/gpt-oss-20b
+GROQ_BASE_URL=https://api.groq.com/openai/v1
 ```
 
 To create PostgreSQL table structure, apply the schema dump with:
@@ -102,7 +119,15 @@ This creates the current application tables in PostgreSQL: `users`, `projects`, 
 ```bash
 cd frontend
 npm install
+cp .env.example .env.local
 npm run dev
+```
+
+`frontend/.env.local` is optional for local development because Vite proxies `/api` to the backend by default. Use it when the frontend needs to talk to a deployed backend directly:
+
+```env
+VITE_API_BASE_URL=https://your-backend.example.com
+VITE_WS_BASE_URL=wss://your-backend.example.com
 ```
 
 ### 3. One-command startup
@@ -121,6 +146,94 @@ This script:
 - starts FastAPI on port `8000`
 - starts Vite on port `5173`
 - prints the database, cache, app, and API docs URLs
+
+## Tests
+
+### Backend and frontend unit/integration tests
+
+```bash
+cd backend
+venv/bin/pytest -q
+
+cd ../frontend
+npm test -- --run
+```
+
+### Browser E2E tests
+
+The Playwright suite covers the full bonus-path flow from registration/login through project creation, document opening, AI suggestion generation, and AI suggestion acceptance.
+
+On first setup:
+
+```bash
+cd frontend
+npm install
+npm run e2e:install
+```
+
+To run the suite:
+
+```bash
+cd frontend
+npm run test:e2e
+```
+
+The E2E harness starts:
+
+- a local FastAPI backend on `127.0.0.1:8000`
+- a local Vite frontend on `127.0.0.1:4173`
+- SQLite storage at `/tmp/lambda_editor_e2e.db`
+- in-process fake Redis
+- a deterministic fake LLM provider so the AI diff flow is repeatable and does not require network access or external API keys
+
+## Vercel Frontend Deployment
+
+For a split deployment, the easiest shape is:
+
+- frontend on Vercel
+- backend on a service that supports long-lived WebSockets and Redis/PostgreSQL connectivity
+
+The frontend no longer assumes the backend lives on the same origin. For a Vercel deployment:
+
+1. Set the Vercel project root directory to `frontend`
+2. Add these frontend environment variables in Vercel:
+
+```env
+VITE_API_BASE_URL=https://your-backend.example.com
+VITE_WS_BASE_URL=wss://your-backend.example.com
+```
+
+3. Update the backend environment so browser auth cookies can be used from the deployed frontend:
+
+```env
+AUTH_COOKIE_SECURE=true
+AUTH_COOKIE_SAMESITE=none
+CORS_ORIGINS=https://your-frontend.vercel.app
+```
+
+`frontend/vercel.json` includes a SPA rewrite so deep links such as `/projects/:projectId/docs/:docId` resolve to the React app correctly.
+
+## Render Backend Deployment
+
+`render.yaml` provisions a free Render web service for the backend, a free Postgres database, and a free Key Value instance for collaboration state.
+
+If you use the Blueprint:
+
+1. In Render, create a new Blueprint from this repository
+2. Provide `CORS_ORIGINS` during setup, for example:
+
+```env
+CORS_ORIGINS=https://lambdav2.vercel.app
+```
+
+3. Optionally provide:
+
+```env
+OPENAI_API_KEY=sk-...
+GOOGLE_TRANSLATE_API_KEY=...
+```
+
+The backend now accepts Render's plain Postgres connection string format (`postgresql://...`) and automatically upgrades it to the async SQLAlchemy driver URL internally, so you can use Render's injected `connectionString` directly as `DATABASE_URL`.
 
 ## Implementation Notes
 
@@ -191,7 +304,7 @@ The implementation uses two WebSocket connections per open document:
 <details>
 <summary><strong>AI model behavior</strong></summary>
 
-- Free-form chat uses a tool-enabled agent path backed by the OpenAI Responses API
+- Free-form chat uses a tool-enabled agent path backed by a configurable OpenAI-compatible Responses API provider
 - The agent can use built-in web search plus custom `research_topic` and `translate_text` tools
 - Translation tool calls are handled with Google Cloud Translation instead of the language model directly
 - LaTeX commands, environments, refs, citations, and math are masked before translation and restored afterward

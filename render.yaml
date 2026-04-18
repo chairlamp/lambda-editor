@@ -1,0 +1,71 @@
+services:
+  - type: web
+    runtime: python
+    name: lambda-backend
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars: &backendEnv
+      - key: PYTHON_VERSION
+        value: 3.12.13
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: lambda-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: lambda-cache
+          property: connectionString
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_COOKIE_NAME
+        value: lambda_access_token
+      - key: REFRESH_TOKEN_COOKIE_NAME
+        value: lambda_refresh_token
+      - key: ACCESS_TOKEN_TTL_SECONDS
+        value: "900"
+      - key: REFRESH_TOKEN_TTL_SECONDS
+        value: "604800"
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+      - key: AUTH_COOKIE_SAMESITE
+        value: none
+      - key: CORS_ORIGINS
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o
+      - key: OPENAI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: GOOGLE_TRANSLATE_API_URL
+        value: https://translation.googleapis.com/language/translate/v2
+      - key: GOOGLE_TRANSLATE_API_KEY
+        sync: false
+      - key: GOOGLE_TRANSLATE_SOURCE_LANGUAGE
+        value: auto
+
+  - type: web
+    runtime: docker
+    name: lambda-backend-docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars: *backendEnv
+
+  - type: keyvalue
+    name: lambda-cache
+    plan: free
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+
+databases:
+  - name: lambda-db
+    plan: free
+    ipAllowList: []

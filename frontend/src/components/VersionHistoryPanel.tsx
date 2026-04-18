@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { X, RotateCcw, Plus, Loader2, Clock } from 'lucide-react'
 import { versionsApi } from '../services/api'
 import { useStore } from '../store/useStore'
+import { C } from '../design'
 
 interface Version {
   id: string
@@ -34,7 +35,6 @@ export default function VersionHistoryPanel({ projectId, docId, onClose }: Props
     setSaving(true)
     try {
       const r = await versionsApi.create(projectId, docId, label.trim())
-      // Keep optimistic ordering aligned with the API so version numbers stay stable.
       setVersions((prev) => [r.data, ...prev])
       setLabel('')
     } finally {
@@ -49,7 +49,6 @@ export default function VersionHistoryPanel({ projectId, docId, onClose }: Props
     try {
       const r = await versionsApi.restore(projectId, docId, v.id)
       updateDocContent(r.data.content)
-      // Reload so the safety snapshot created during restore appears immediately.
       const refreshed = await versionsApi.list(projectId, docId)
       setVersions(refreshed.data)
     } finally {
@@ -59,44 +58,53 @@ export default function VersionHistoryPanel({ projectId, docId, onClose }: Props
 
   return (
     <div style={{
-      position: 'fixed', top: 0, right: 0, bottom: 0, width: 340,
-      background: '#12122a', borderLeft: '1px solid #1e1e3a',
+      position: 'fixed', top: 0, right: 0, bottom: 0, width: 320,
+      background: C.bgCard, borderLeft: `1px solid ${C.border}`,
       display: 'flex', flexDirection: 'column', zIndex: 500,
+      boxShadow: '-16px 0 48px rgba(0,0,0,0.35)',
     }}>
+      {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '12px 16px', background: '#16213e', borderBottom: '1px solid #1e1e3a',
+        padding: '0 14px', height: 46,
+        background: C.bgRaised, borderBottom: `1px solid ${C.borderFaint}`,
         flexShrink: 0,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Clock size={14} color="#818cf8" />
-          <span style={{ fontSize: 13, fontWeight: 700, color: '#c7d2fe' }}>Version History</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <Clock size={13} color={C.accent} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Version History</span>
         </div>
-        <button onClick={onClose} style={iconBtn}><X size={14} /></button>
+        <button onClick={onClose} style={iconBtn}><X size={13} /></button>
       </div>
 
-      <div style={{ padding: '12px 14px', borderBottom: '1px solid #1e1e3a', flexShrink: 0 }}>
-        <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8 }}>Save current state as a snapshot</div>
+      {/* Save snapshot */}
+      <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.borderFaint}`, flexShrink: 0 }}>
+        <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 7 }}>Save current state as a snapshot</div>
         <div style={{ display: 'flex', gap: 6 }}>
           <input
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && saveSnapshot()}
             placeholder={`v${versions.length + 1} — optional label`}
-            style={inputStyle}
+            style={inputSt}
           />
-          <button onClick={saveSnapshot} disabled={saving} style={saveBtn}>
-            {saving ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Plus size={13} />}
+          <button onClick={saveSnapshot} disabled={saving} style={saveBtn} title="Save snapshot">
+            {saving
+              ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+              : <Plus size={12} />}
           </button>
         </div>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+      {/* Version list */}
+      <div style={{ flex: 1, overflow: 'auto' }}>
         {loading && (
-          <div style={{ color: '#4a4a6a', fontSize: 12, textAlign: 'center', padding: 24 }}>Loading…</div>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 28 }}>
+            <Loader2 size={15} color={C.textMuted} style={{ animation: 'spin 1s linear infinite' }} />
+          </div>
         )}
         {!loading && versions.length === 0 && (
-          <div style={{ color: '#4a4a6a', fontSize: 12, textAlign: 'center', padding: 24 }}>
+          <div style={{ color: C.textMuted, fontSize: 12, textAlign: 'center', padding: 28 }}>
             No snapshots yet. Save one above.
           </div>
         )}
@@ -105,16 +113,16 @@ export default function VersionHistoryPanel({ projectId, docId, onClose }: Props
           return (
             <div key={v.id} style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '10px 14px', borderBottom: '1px solid #1a1a30',
+              padding: '10px 14px', borderBottom: `1px solid ${C.borderFaint}`,
             }}>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#c7d2fe' }}>
+                <div style={{ fontSize: 12.5, fontWeight: 500, color: C.textPrimary }}>
                   v{num}
                   {v.label && (
-                    <span style={{ color: '#818cf8', fontWeight: 400, marginLeft: 6 }}>— {v.label}</span>
+                    <span style={{ color: C.textSecondary, fontWeight: 400, marginLeft: 5 }}>— {v.label}</span>
                   )}
                 </div>
-                <div style={{ fontSize: 11, color: '#4a4a6a', marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
                   {new Date(v.created_at).toLocaleString()}
                 </div>
               </div>
@@ -132,29 +140,26 @@ export default function VersionHistoryPanel({ projectId, docId, onClose }: Props
           )
         })}
       </div>
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
 
-
 const iconBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
-  width: 26, height: 26, borderRadius: 5, border: '1px solid #2a2a4a',
-  background: 'transparent', color: '#9ca3af', cursor: 'pointer',
+  width: 27, height: 27, borderRadius: 6, border: `1px solid ${C.border}`,
+  background: 'transparent', color: C.textSecondary, cursor: 'pointer',
 }
-const inputStyle: React.CSSProperties = {
-  flex: 1, background: '#0f0f23', border: '1px solid #2a2a4a', borderRadius: 6,
-  padding: '6px 10px', color: '#e2e8f0', fontSize: 12, outline: 'none',
+const inputSt: React.CSSProperties = {
+  flex: 1, background: C.bgBase, border: `1px solid ${C.border}`, borderRadius: 6,
+  padding: '6px 10px', color: C.textPrimary, fontSize: 12, outline: 'none', fontFamily: 'inherit',
 }
 const saveBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
   width: 30, height: 30, borderRadius: 6, border: 'none', flexShrink: 0,
-  background: '#4f46e5', color: '#fff', cursor: 'pointer',
+  background: C.accent, color: '#fff', cursor: 'pointer',
 }
 const restoreBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
-  width: 28, height: 28, borderRadius: 5, border: '1px solid #2a2a4a',
-  background: 'transparent', color: '#818cf8', cursor: 'pointer', flexShrink: 0,
+  width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`,
+  background: 'transparent', color: C.accent, cursor: 'pointer', flexShrink: 0,
 }

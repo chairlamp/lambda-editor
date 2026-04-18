@@ -95,6 +95,11 @@ class JoinRequest(BaseModel):
     invite_token: str
 
 
+class DirectAddMember(BaseModel):
+    username_or_email: str
+    role: str = "editor"
+
+
 async def _get_membership(
     project_id: str, user_id: str, db: AsyncSession
 ) -> Optional[ProjectMember]:
@@ -325,6 +330,42 @@ async def create_project_membership(
     await db.commit()
 
     return await _project_out(project, invite.role, db)
+
+
+@router.post("/{project_id}/members", response_model=MemberOut, status_code=201)
+async def add_member_direct(
+    project_id: str,
+    data: DirectAddMember,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a user to a project directly by username or email (owner only)."""
+    await _require_project(project_id, current_user.id, db, min_role="owner")
+
+    if data.role not in VALID_ROLES or data.role == "owner":
+        raise HTTPException(status_code=400, detail="Role must be editor or viewer")
+
+    # Look up the target user by username or email.
+    identifier = data.username_or_email.strip()
+    res = await db.execute(
+        select(User).where(
+            (User.username == identifier) | (User.email == identifier)
+        )
+    )
+    target = res.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You are already a member")
+
+    existing = await _get_membership(project_id, target.id, db)
+    if existing:
+        raise HTTPException(status_code=409, detail="User is already a member of this project")
+
+    membership = ProjectMember(project_id=project_id, user_id=target.id, role=data.role)
+    db.add(membership)
+    await db.commit()
+    return MemberOut(user_id=target.id, username=target.username, email=target.email, role=data.role)
 
 
 @router.get("/{project_id}/members", response_model=List[MemberOut])

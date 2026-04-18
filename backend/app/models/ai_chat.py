@@ -26,5 +26,5 @@ class AIChatMessage(Base):
     rejected_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
-    document: Mapped["Document"] = relationship("Document")
+    document: Mapped["Document"] = relationship("Document", back_populates="ai_messages")
     user: Mapped["User"] = relationship("User")

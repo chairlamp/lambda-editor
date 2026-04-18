@@ -6,6 +6,7 @@ import { MonacoBinding } from 'y-monaco'
 import { useStore } from '../store/useStore'
 import { RoomSocket } from '../services/socket'
 import { FileText, Quote, MapPin } from 'lucide-react'
+import { C, getMonacoTheme } from '../design'
 
 interface RemoteCursor {
   color: string
@@ -50,7 +51,7 @@ const LATEX_SNIPPETS = [
 ]
 
 export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRegisterTextInserter, onRegisterGetCursorPos, onCursorMove, onSelectionQuote, pickingLocation, onLocationPicked, ownUsername, ownColor, language = 'plaintext' }: Props) {
-  const { currentDoc, updateDocContent } = useStore()
+  const { currentDoc, updateDocContent, setSaveStatus, theme } = useStore()
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof Monaco | null>(null)
   const isRemoteUpdate = useRef(false)
@@ -65,6 +66,9 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
 
   const [selPopup, setSelPopup] = useState<SelectionPopup | null>(null)
   const [editorReady, setEditorReady] = useState(false)
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isTypingRef = useRef(false)
 
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor
@@ -271,13 +275,54 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
     decorationIds.current = editor.deltaDecorations(decorationIds.current, newDecorations)
   }, [remoteDecorations])
 
+  // Fire typing indicator and save-status updates on any local content change.
+  const handleLocalEdit = useCallback(() => {
+    if (readOnly) return
+    // Save status: mark as saving; reset timer to "saved" 3s after the last keystroke.
+    setSaveStatus('saving')
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => setSaveStatus('saved'), 3000)
+
+    // Typing indicator: start indicator if not already active; stop after 3s of silence.
+    if (!isTypingRef.current) {
+      isTypingRef.current = true
+      socketRef.current?.sendTyping(true)
+    }
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
+    typingTimerRef.current = setTimeout(() => {
+      isTypingRef.current = false
+      socketRef.current?.sendTyping(false)
+    }, 3000)
+  }, [readOnly, setSaveStatus])
+
+  // For Yjs-backed docs, watch the Y.Text directly for local transaction events.
+  useEffect(() => {
+    if (!ydoc) return
+    const ytext = ydoc.getText('content')
+    const observer = (_: unknown, transaction: any) => {
+      if (transaction.local) handleLocalEdit()
+    }
+    ytext.observe(observer)
+    return () => ytext.unobserve(observer)
+  }, [ydoc, handleLocalEdit])
+
+  // Clean up timers and stop-typing signal when unmounting.
+  useEffect(() => {
+    return () => {
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      if (isTypingRef.current) socketRef.current?.sendTyping(false)
+    }
+  }, [])
+
   const handleChange = useCallback(
     (value: string | undefined) => {
       if (ydoc) return
       if (isRemoteUpdate.current) return
       updateDocContent(value ?? '')
+      handleLocalEdit()
     },
-    [ydoc, updateDocContent]
+    [ydoc, updateDocContent, handleLocalEdit]
   )
 
   const handleQuote = () => {
@@ -291,7 +336,7 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
       <MonacoEditor
         height="100%"
         language={language}
-        theme="vs-dark"
+        theme={getMonacoTheme(theme)}
         value={currentDoc?.content ?? ''}
         onChange={handleChange}
         onMount={handleMount}
@@ -315,12 +360,12 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
       {pickingLocation && (
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20,
-          background: '#78350f', borderBottom: '2px solid #fbbf24',
+          background: C.yellowSubtle, borderBottom: `2px solid ${C.yellow}`,
           padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 8,
           pointerEvents: 'none',
         }}>
-          <MapPin size={13} color="#fbbf24" />
-          <span style={{ fontSize: 12, color: '#fde68a', fontWeight: 600 }}>
+          <MapPin size={13} color={C.yellow} />
+          <span style={{ fontSize: 12, color: C.yellow, fontWeight: 600 }}>
             Click anywhere in the document to set the equation insertion point
           </span>
         </div>
@@ -336,8 +381,8 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
             display: 'flex',
             alignItems: 'center',
             gap: 6,
-            background: '#1e1e3a',
-            border: '1px solid #4f46e5',
+            background: C.bgCard,
+            border: `1px solid ${C.accentBorder}`,
             borderRadius: 6,
             padding: '4px 10px',
             boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
@@ -346,15 +391,15 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
           // Preserve the selected range so quoting still has access to the original text.
           onMouseDown={(e) => e.preventDefault()}
         >
-          <FileText size={11} color="#818cf8" />
-          <span style={{ fontSize: 11, color: '#6b7280' }}>
+          <FileText size={11} color={C.accent} />
+          <span style={{ fontSize: 11, color: C.textSecondary }}>
             L{selPopup.lineStart}{selPopup.lineEnd !== selPopup.lineStart ? `–${selPopup.lineEnd}` : ''}
           </span>
           <button
             onClick={handleQuote}
             style={{
               display: 'flex', alignItems: 'center', gap: 4,
-              background: '#4f46e5', border: 'none', borderRadius: 4,
+              background: C.accent, border: 'none', borderRadius: 4,
               color: '#fff', fontSize: 11, fontWeight: 600,
               padding: '2px 8px', cursor: 'pointer',
             }}
