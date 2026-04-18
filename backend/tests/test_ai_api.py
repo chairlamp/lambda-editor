@@ -1,3 +1,8 @@
+import asyncio
+
+import pytest
+
+from app.api import ai as ai_api
 from app.services import ai_service
 
 
@@ -136,3 +141,69 @@ async def test_ai_diff_history_and_review_state_are_persisted(client_factory, mo
         },
     )
     assert viewer_response.status_code == 403
+
+
+async def _drain(response) -> str:
+    body = ""
+    async for piece in response.body_iterator:
+        body += piece if isinstance(piece, str) else piece.decode()
+    return body
+
+
+async def test_sse_error_emits_explicit_event_frame_and_skips_on_complete():
+    """Provider failures mid-stream must surface as an SSE error event, and
+    ``on_complete`` must not run so partial output is never persisted."""
+
+    async def bad_gen():
+        yield "Hello"
+        raise RuntimeError("boom")
+
+    completions: list[str] = []
+
+    async def on_complete(content: str) -> None:
+        completions.append(content)
+
+    response = ai_api._sse(bad_gen(), on_complete=on_complete)
+    body = await _drain(response)
+
+    assert 'data: "Hello"' in body
+    assert "event: error" in body
+    assert "boom" in body
+    assert "data: [DONE]" in body
+    assert completions == []
+
+
+async def test_sse_client_disconnect_cancels_stream_without_persisting():
+    """A client disconnect cancels the generator task; partial chunks must
+    not reach ``on_complete`` because history is only persisted on success."""
+
+    gate = asyncio.Event()  # never set — forces the generator to suspend
+
+    async def slow_gen():
+        yield "Hello"
+        await gate.wait()
+        yield " world"
+
+    completions: list[str] = []
+
+    async def on_complete(content: str) -> None:
+        completions.append(content)
+
+    response = ai_api._sse(slow_gen(), on_complete=on_complete)
+    it = response.body_iterator.__aiter__()
+
+    # Pull the open-comment and the first chunk so the generator is suspended
+    # inside _with_heartbeats, waiting for the next token from slow_gen.
+    open_frame = await it.__anext__()
+    first_chunk = await it.__anext__()
+    assert ": open" in (open_frame if isinstance(open_frame, str) else open_frame.decode())
+    assert 'data: "Hello"' in (first_chunk if isinstance(first_chunk, str) else first_chunk.decode())
+
+    # Simulate the client going away: cancel the pending __anext__.
+    pending = asyncio.create_task(it.__anext__())
+    await asyncio.sleep(0)
+    pending.cancel()
+    with pytest.raises((asyncio.CancelledError, StopAsyncIteration)):
+        await pending
+
+    assert completions == []

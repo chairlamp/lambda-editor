@@ -29,6 +29,32 @@ SSE_HEADERS = {
     "X-Accel-Buffering": "no",
 }
 
+# Idle proxies (Nginx default 60s, Cloudflare ~100s) close SSE connections when no
+# bytes flow. Emit an SSE comment line every KEEPALIVE_INTERVAL_SECONDS so slow LLM
+# generations survive those timeouts. Comments are ignored by compliant clients.
+KEEPALIVE_INTERVAL_SECONDS = 15.0
+_HEARTBEAT = object()
+
+
+async def _with_heartbeats(aiter, interval: float):
+    """Yield items from ``aiter``, injecting ``_HEARTBEAT`` during idle gaps."""
+    it = aiter.__aiter__()
+    pending: Optional[asyncio.Task] = asyncio.ensure_future(it.__anext__())
+    try:
+        while True:
+            done, _ = await asyncio.wait({pending}, timeout=interval)
+            if not done:
+                yield _HEARTBEAT
+                continue
+            try:
+                yield pending.result()
+            except StopAsyncIteration:
+                return
+            pending = asyncio.ensure_future(it.__anext__())
+    finally:
+        if pending is not None and not pending.done():
+            pending.cancel()
+
 router = APIRouter(tags=["ai"])
 
 
@@ -242,7 +268,10 @@ def _sse(
         # A leading comment flushes headers/intermediaries before the first token.
         yield ": open\n\n"
         try:
-            async for chunk in generator:
+            async for chunk in _with_heartbeats(generator, KEEPALIVE_INTERVAL_SECONDS):
+                if chunk is _HEARTBEAT:
+                    yield ": ping\n\n"
+                    continue
                 collected.append(chunk)
                 if doc_id:
                     await manager.broadcast_to_room(doc_id, {
