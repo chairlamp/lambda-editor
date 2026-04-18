@@ -58,4 +58,28 @@ describe("DiffView", () => {
     expect(screen.queryByTitle("Accept")).not.toBeInTheDocument();
     expect(screen.queryByTitle("Reject")).not.toBeInTheDocument();
   });
+
+  it("shows drift guidance for stale suggestions", () => {
+    render(
+      <DiffView
+        explanation="Suggested one improvement."
+        changes={[change]}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onAcceptAll={vi.fn()}
+        onRejectAll={vi.fn()}
+        onAskDifferent={vi.fn()}
+        onRefreshConflicts={vi.fn()}
+        accepted={new Set()}
+        rejected={new Set()}
+        conflicted={new Set(["c1"])}
+      />,
+    );
+
+    expect(screen.getByText(/document changed after this suggestion was generated/i)).toBeInTheDocument();
+    expect(screen.getByText(/current document no longer contains the expected original text/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /refresh checks/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /review again/i })).toBeInTheDocument();
+    expect(screen.queryByTitle("Accept")).not.toBeInTheDocument();
+  });
 });

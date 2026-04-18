@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import List, Optional
 
@@ -61,7 +62,7 @@ class DocumentSummary(BaseModel):
     mime_type: Optional[str] = None
     file_size: Optional[int] = None
     content_revision: int
-    updated_at: Optional[str] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -79,6 +80,7 @@ class DocumentResponse(BaseModel):
     mime_type: Optional[str] = None
     file_size: Optional[int] = None
     content_revision: int
+    updated_at: Optional[datetime] = None
     compile_success: Optional[bool] = None
     compile_pdf_base64: Optional[str] = None
     compile_log: Optional[str] = None

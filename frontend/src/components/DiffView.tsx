@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, X, ArrowRight, ChevronDown, ChevronUp, Pencil } from 'lucide-react'
+import { Check, X, ArrowRight, ChevronDown, ChevronUp, Pencil, RefreshCw } from 'lucide-react'
 import { C } from '../design'
 
 export interface DiffChange {
@@ -17,8 +17,10 @@ interface Props {
   onAcceptAll: () => void
   onRejectAll: () => void
   onAskDifferent?: () => void
+  onRefreshConflicts?: () => void
   accepted: Set<string>
   rejected: Set<string>
+  conflicted?: Set<string>
   canReview?: boolean
 }
 
@@ -30,8 +32,10 @@ export default function DiffView({
   onAcceptAll,
   onRejectAll,
   onAskDifferent,
+  onRefreshConflicts,
   accepted,
   rejected,
+  conflicted = new Set(),
   canReview = true,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set(changes.map((c) => c.id)))
@@ -69,6 +73,8 @@ export default function DiffView({
   }
 
   const pending = changes.filter((c) => !accepted.has(c.id) && !rejected.has(c.id))
+  const actionablePending = pending.filter((c) => !conflicted.has(c.id))
+  const conflictedPending = pending.filter((c) => conflicted.has(c.id))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -80,19 +86,43 @@ export default function DiffView({
         {explanation}
       </div>
 
-      {((pending.length > 0 && canReview) || onAskDifferent) && (
+      {conflictedPending.length > 0 && (
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: 8,
+          background: C.yellowSubtle, border: `1px solid ${C.yellow}`,
+          borderRadius: 8, padding: '10px 12px',
+        }}>
+          <div style={{ fontSize: 12, color: C.textPrimary, lineHeight: 1.5 }}>
+            The document changed after this suggestion was generated. Re-check the current document before accepting those changes.
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {onRefreshConflicts && (
+              <button onClick={onRefreshConflicts} style={refreshBtn}>
+                <RefreshCw size={11} /> Refresh checks
+              </button>
+            )}
+            {onAskDifferent && (
+              <button onClick={onAskDifferent} style={alternateBtn}>
+                <ArrowRight size={11} /> Review again
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {((actionablePending.length > 0 && canReview) || (onAskDifferent && conflictedPending.length === 0)) && (
         <div style={{ display: 'flex', gap: 6 }}>
-          {pending.length > 0 && canReview && (
+          {actionablePending.length > 0 && canReview && (
             <>
               <button onClick={onAcceptAll} style={acceptAllBtn}>
-                <Check size={11} /> Accept all ({pending.length})
+                <Check size={11} /> Accept all ({actionablePending.length})
               </button>
               <button onClick={onRejectAll} style={rejectAllBtn}>
                 <X size={11} /> Reject all
               </button>
             </>
           )}
-          {onAskDifferent && (
+          {onAskDifferent && conflictedPending.length === 0 && (
             <button onClick={onAskDifferent} style={alternateBtn}>
               <ArrowRight size={11} /> Continue
             </button>
@@ -104,6 +134,7 @@ export default function DiffView({
         const isAccepted = accepted.has(change.id)
         const isRejected = rejected.has(change.id)
         const isPending = !isAccepted && !isRejected
+        const isConflicted = isPending && conflicted.has(change.id)
         const isOpen = expanded.has(change.id)
         const isEditing = editDrafts.has(change.id)
         const draft = editDrafts.get(change.id) ?? change.new_text
@@ -131,11 +162,16 @@ export default function DiffView({
                 </span>
                 {isAccepted && <span style={{ fontSize: 10.5, color: C.green }}>✓ accepted</span>}
                 {isRejected && <span style={{ fontSize: 10.5, color: C.red }}>✗ rejected</span>}
+                {isConflicted && <span style={{ fontSize: 10.5, color: C.yellow }}>⚠ stale</span>}
                 {isEditing && <span style={{ fontSize: 10.5, color: C.blue }}>editing…</span>}
               </div>
               {isPending && canReview && (
                 <div style={{ display: 'flex', gap: 4 }}>
-                  {isEditing ? (
+                  {isConflicted ? (
+                    <button onClick={() => onReject(change.id)} style={rejectBtn} title="Reject">
+                      <X size={11} />
+                    </button>
+                  ) : isEditing ? (
                     <>
                       <button onClick={() => acceptEdited(change)} style={acceptBtn} title="Accept edited version">
                         <Check size={11} />
@@ -164,6 +200,12 @@ export default function DiffView({
             {isPending && !canReview && (
               <div style={{ padding: '0 12px 8px', fontSize: 11, color: C.textMuted }}>
                 Viewers cannot accept or reject AI changes.
+              </div>
+            )}
+
+            {isConflicted && (
+              <div style={{ padding: '0 12px 8px', fontSize: 11, color: C.yellow }}>
+                The current document no longer contains the expected original text for this change.
               </div>
             )}
 
@@ -255,6 +297,11 @@ const alternateBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 4, padding: '4px 9px',
   borderRadius: 5, border: `1px solid rgba(96,165,250,0.3)`, background: C.blueSubtle,
   color: C.blue, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
+}
+const refreshBtn: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 4, padding: '4px 9px',
+  borderRadius: 5, border: `1px solid rgba(251,191,36,0.35)`, background: C.yellowSubtle,
+  color: C.yellow, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
 }
 const chevronBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', background: 'none',

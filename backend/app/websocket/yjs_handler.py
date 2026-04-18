@@ -53,6 +53,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import uuid
 from contextlib import suppress
 from typing import Dict, Optional
@@ -66,6 +67,9 @@ from app.database import AsyncSessionLocal
 from app.models.document import Document
 from app.models.project import ProjectMember
 from app.redis_client import redis_client
+from app.websocket.manager import manager
+
+logger = logging.getLogger(__name__)
 
 def _enc_vu(n: int) -> bytes:
     buf = []
@@ -107,6 +111,18 @@ def _b64decode(data: Optional[str]) -> Optional[bytes]:
     if not data:
         return None
     return base64.b64decode(data.encode("ascii"))
+
+
+def _content_fingerprint(content: str) -> dict[str, object]:
+    encoded = content.encode("utf-8")
+    hash_value = 0x811C9DC5
+    for byte in encoded:
+        hash_value ^= byte
+        hash_value = (hash_value * 0x01000193) & 0xFFFFFFFF
+    return {
+        "content_hash": f"{hash_value:08x}",
+        "content_length": len(encoded),
+    }
 
 
 def _msg_step1(sv: bytes) -> bytes:
@@ -313,8 +329,49 @@ class _Room:
                     doc.content = content
                     doc.content_revision += 1
                     await db.commit()
+                    await db.refresh(doc)
+                    await manager.broadcast_to_room(
+                        self.doc_id,
+                        {
+                            "type": "save_status",
+                            "status": "saved",
+                            "content_revision": doc.content_revision,
+                            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                            **_content_fingerprint(content),
+                        },
+                    )
+                    await manager.broadcast_to_room(
+                        f"project:{doc.project_id}",
+                        {
+                            "type": "document_updated",
+                            "document": {
+                                "id": doc.id,
+                                "title": doc.title,
+                                "path": doc.path,
+                                "kind": doc.kind,
+                                "owner_id": doc.owner_id,
+                                "project_id": doc.project_id,
+                                "source_filename": doc.source_filename,
+                                "mime_type": doc.mime_type,
+                                "file_size": doc.file_size,
+                                "content_revision": doc.content_revision,
+                                "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                            },
+                        },
+                    )
+                    return
         except Exception:
-            pass
+            logger.exception("Failed to persist Yjs document %s", self.doc_id)
+
+        await manager.broadcast_to_room(
+            self.doc_id,
+            {
+                "type": "save_status",
+                "status": "error",
+                "error": "Could not persist document changes.",
+                **_content_fingerprint(content),
+            },
+        )
 
 
 _rooms: Dict[str, _Room] = {}

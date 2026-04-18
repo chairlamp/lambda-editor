@@ -159,7 +159,7 @@ export const aiChatApi = {
     prompt: string
     document_context?: string
     action_id?: string
-  }) => api.post(`/projects/${projectId}/documents/${docId}/ai/messages`, payload),
+  }, signal?: AbortSignal) => api.post(`/projects/${projectId}/documents/${docId}/ai/messages`, payload, { signal }),
   history: (projectId: string, docId: string) =>
     api.get(`/projects/${projectId}/documents/${docId}/ai/messages`),
   updateReviewState: (projectId: string, docId: string, messageId: string, accepted: string[], rejected: string[]) =>
@@ -179,6 +179,7 @@ export async function streamAI(
   onChunk: (chunk: string) => void,
   onDone: () => void,
   onError: (err: string) => void,
+  onCancelled: () => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const makeRequest = () => fetch(apiUrl(endpoint), {
@@ -193,7 +194,7 @@ export async function streamAI(
   try {
     res = await makeRequest()
   } catch (err: any) {
-    if (err?.name === 'AbortError') { onDone(); return }
+    if (err?.name === 'AbortError') { onCancelled(); return }
     onError(`Request failed: ${err?.message ?? 'network error'}`)
     return
   }
@@ -268,7 +269,7 @@ export async function streamAI(
       }
     }
   } catch (err: any) {
-    if (err?.name === 'AbortError') { onDone(); return }
+    if (err?.name === 'AbortError') { onCancelled(); return }
     onError(`Stream interrupted: ${err?.message ?? 'unknown error'}`)
     return
   }

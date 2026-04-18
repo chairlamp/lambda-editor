@@ -60,6 +60,10 @@ export interface ChatMessage {
   fromUser?: string
   accepted?: string[]
   rejected?: string[]
+  provider?: string
+  model?: string
+  status?: string
+  error?: string
 }
 
 export type ActionType = 'equation' | 'translate' | 'suggest' | 'simplify' | 'summarize'

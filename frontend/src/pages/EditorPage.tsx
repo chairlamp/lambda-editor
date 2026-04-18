@@ -14,6 +14,7 @@ import { WS_BASE_URL } from '../config'
 import { docsApi } from '../services/api'
 import { RoomSocket } from '../services/socket'
 import { Presence, useStore } from '../store/useStore'
+import { saveEventMatchesContent } from '../utils/save-state'
 
 interface RemoteCursor {
   color: string
@@ -51,13 +52,12 @@ export default function EditorPage() {
   const navigate = useNavigate()
   const {
     token, currentDoc, setCurrentDoc, setPresence, setConnected,
-    updateDocContent, updateDocTitle, setCompiledPdf,
-    isConnected, user, setTypingUser, clearTypingUsers,
+    updateDocContent, updateDocTitle, updateDocSyncState, setCompiledPdf,
+    isConnected, user, setTypingUser, clearTypingUsers, setSaveState,
   } = useStore()
 
   const socketRef = useRef<RoomSocket | null>(null)
   const textInserterRef = useRef<((text: string) => void) | null>(null)
-  const currentDocRef = useRef(currentDoc)
 
   const [showAI, setShowAI] = useState(true)
   const [showVersionHistory, setShowVersionHistory] = useState(false)
@@ -75,10 +75,6 @@ export default function EditorPage() {
 
   // Wait for the first Yjs sync so Monaco never binds to an empty CRDT snapshot.
   const [syncedYdoc, setSyncedYdoc] = useState<Y.Doc | null>(null)
-
-  useEffect(() => {
-    currentDocRef.current = currentDoc
-  }, [currentDoc])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -218,6 +214,26 @@ export default function EditorPage() {
         if (!msg.user_id || !msg.username) return
         setTypingUser({ user_id: msg.user_id as string, username: msg.username as string }, !!msg.is_typing)
       }),
+      socket.on('save_status', (msg: any) => {
+        const activeDoc = useStore.getState().currentDoc
+        if (!activeDoc || activeDoc.id !== docId) return
+        const currentContent = activeDoc.content || ''
+
+        if (msg.status === 'saved') {
+          updateDocSyncState({
+            content_revision: typeof msg.content_revision === 'number' ? msg.content_revision : activeDoc.content_revision,
+            updated_at: typeof msg.updated_at === 'string' ? msg.updated_at : activeDoc.updated_at,
+          })
+          if (saveEventMatchesContent(currentContent, msg)) {
+            setSaveState('saved')
+          }
+          return
+        }
+
+        if (msg.status === 'error' && saveEventMatchesContent(currentContent, msg)) {
+          setSaveState('error', typeof msg.error === 'string' ? msg.error : 'Could not persist document changes.')
+        }
+      }),
     ]
 
     socket.connect()
@@ -229,7 +245,7 @@ export default function EditorPage() {
       socketRef.current = null
       clearTypingUsers()
     }
-  }, [docId, token, isEditableDoc, currentDoc?.kind, setConnected, setPresence, updateDocTitle, setCompiledPdf, setTypingUser, clearTypingUsers])
+  }, [docId, token, isEditableDoc, currentDoc?.kind, setConnected, setPresence, updateDocTitle, updateDocSyncState, setCompiledPdf, setTypingUser, clearTypingUsers, setSaveState])
 
   // Start Monaco binding only after the provider has real document state to avoid flicker.
   useEffect(() => {

@@ -81,6 +81,10 @@ CREATE TABLE IF NOT EXISTS ai_chat_messages (
     retry_action_json TEXT,
     accepted_json TEXT,
     rejected_json TEXT,
+    provider VARCHAR,
+    model VARCHAR,
+    status VARCHAR,
+    error_message TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
