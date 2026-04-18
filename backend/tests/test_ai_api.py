@@ -1,4 +1,5 @@
 from app.services import ai_service
+from app.config import settings
 
 
 async def _register(client, email: str, username: str):
@@ -60,10 +61,21 @@ async def test_streaming_ai_generation_persists_history(client, monkeypatch):
     )
     assert history_response.status_code == 200
     history = history_response.json()
-    assert len(history) == 1
-    assert history[0]["id"] == "act-1-res"
-    assert history[0]["role"] == "assistant"
-    assert history[0]["content"] == "Hello world"
+    assert len(history) == 2
+
+    history_by_id = {message["id"]: message for message in history}
+    assert history_by_id["act-1"]["role"] == "user"
+    assert history_by_id["act-1"]["content"] == "Summarize this"
+    assert history_by_id["act-1"]["action_prompt"] == "Summarize this"
+    assert history_by_id["act-1"]["provider"] == settings.llm_provider
+    assert history_by_id["act-1"]["model"] == settings.llm_model
+    assert history_by_id["act-1"]["status"] == "submitted"
+
+    assert history_by_id["act-1-res"]["role"] == "assistant"
+    assert history_by_id["act-1-res"]["content"] == "Hello world"
+    assert history_by_id["act-1-res"]["provider"] == settings.llm_provider
+    assert history_by_id["act-1-res"]["model"] == settings.llm_model
+    assert history_by_id["act-1-res"]["status"] == "completed"
 
 
 async def test_ai_diff_history_and_review_state_are_persisted(client_factory, monkeypatch):
@@ -118,11 +130,22 @@ async def test_ai_diff_history_and_review_state_are_persisted(client_factory, mo
     )
     assert history_response.status_code == 200
     history = history_response.json()
-    assert len(history) == 1
-    assert history[0]["id"] == "act-2-diff"
-    assert history[0]["diff"]["changes"][0]["new_text"] == "Overview"
-    assert history[0]["accepted"] == ["c1"]
-    assert history[0]["retry_action"] == {
+    assert len(history) == 2
+
+    history_by_id = {message["id"]: message for message in history}
+    assert history_by_id["act-2"]["role"] == "user"
+    assert history_by_id["act-2"]["action_type"] == "suggest"
+    assert history_by_id["act-2"]["action_prompt"] == "Tighten the introduction"
+    assert history_by_id["act-2"]["provider"] == settings.llm_provider
+    assert history_by_id["act-2"]["model"] == settings.llm_model
+    assert history_by_id["act-2"]["status"] == "submitted"
+
+    assert history_by_id["act-2-diff"]["diff"]["changes"][0]["new_text"] == "Overview"
+    assert history_by_id["act-2-diff"]["accepted"] == ["c1"]
+    assert history_by_id["act-2-diff"]["provider"] == settings.llm_provider
+    assert history_by_id["act-2-diff"]["model"] == settings.llm_model
+    assert history_by_id["act-2-diff"]["status"] == "completed"
+    assert history_by_id["act-2-diff"]["retry_action"] == {
         "type": "suggest",
         "instruction": "Tighten the introduction",
     }
@@ -136,3 +159,53 @@ async def test_ai_diff_history_and_review_state_are_persisted(client_factory, mo
         },
     )
     assert viewer_response.status_code == 403
+
+
+async def test_failed_ai_diff_is_persisted_with_error_metadata(client, monkeypatch):
+    await _register(client, "owner3@example.com", "owner3")
+    project = await _create_project(client, "AI Failure")
+
+    async def failing_suggest_changes(instruction: str, document_content: str, variation_request: str = ""):
+        raise RuntimeError("LLM temporarily unavailable")
+
+    monkeypatch.setattr(ai_service, "suggest_changes", failing_suggest_changes)
+
+    doc_response = await client.get(f"/projects/{project['id']}/documents/{project['main_doc_id']}")
+    assert doc_response.status_code == 200
+
+    diff_response = await client.post(
+        f"/projects/{project['id']}/documents/{project['main_doc_id']}/ai/change-suggestions",
+        json={
+            "instruction": "Try a failing edit",
+            "document_content": doc_response.json()["content"],
+            "action_id": "act-fail",
+        },
+    )
+    assert diff_response.status_code == 503
+    assert diff_response.json()["detail"] == "LLM temporarily unavailable"
+
+    history_response = await client.get(
+        f"/projects/{project['id']}/documents/{project['main_doc_id']}/ai/messages"
+    )
+    assert history_response.status_code == 200
+    history = history_response.json()
+    assert len(history) == 2
+
+    history_by_id = {message["id"]: message for message in history}
+    assert history_by_id["act-fail"]["role"] == "user"
+    assert history_by_id["act-fail"]["status"] == "submitted"
+    assert history_by_id["act-fail"]["provider"] == settings.llm_provider
+    assert history_by_id["act-fail"]["model"] == settings.llm_model
+
+    failed_message = history_by_id["act-fail-diff"]
+    assert failed_message["role"] == "assistant"
+    assert failed_message["status"] == "failed"
+    assert failed_message["error"] == "LLM temporarily unavailable"
+    assert failed_message["provider"] == settings.llm_provider
+    assert failed_message["model"] == settings.llm_model
+    assert failed_message["retry_action"] == {
+        "type": "suggest",
+        "instruction": "Try a failing edit",
+    }
+    assert failed_message["diff"]["changes"] == []
+    assert failed_message["diff"]["explanation"] == "LLM temporarily unavailable"

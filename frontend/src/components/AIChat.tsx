@@ -162,7 +162,9 @@ export default function AIChat({
         if (existingMsgId) {
           streamingMsgRef.current.delete(actionId)
           setMessages((prev) => prev.map((m) =>
-            m.id === existingMsgId ? { ...m, streaming: false } : m
+            m.id === existingMsgId
+              ? { ...m, streaming: false, status: msg.status || m.status || 'completed', error: msg.error || m.error }
+              : m
           ))
         }
 
@@ -171,7 +173,14 @@ export default function AIChat({
         setMessages((prev) => prev.some((m) => m.id === `${actionId}-diff`) ? prev : [...prev, {
           id: `${actionId}-diff`,
           role: 'assistant', content: '', streaming: false,
-          diff: msg.diff, toolCalls: msg.tool_calls || msg.diff?.tool_calls || undefined, fromUser, retryAction: retryRequest,
+          diff: msg.diff,
+          toolCalls: msg.tool_calls || msg.diff?.tool_calls || undefined,
+          fromUser,
+          retryAction: retryRequest,
+          provider: msg.provider || undefined,
+          model: msg.model || undefined,
+          status: msg.status || undefined,
+          error: msg.error || undefined,
         }])
       } else if (event === 'agent_result') {
         setMessages((prev) => prev.some((m) => m.id === `${actionId}-res`) ? prev : [...prev, {
@@ -181,6 +190,10 @@ export default function AIChat({
           sources: msg.sources || undefined,
           toolCalls: msg.tool_calls || undefined,
           fromUser,
+          provider: msg.provider || undefined,
+          model: msg.model || undefined,
+          status: msg.status || undefined,
+          error: msg.error || undefined,
         }])
       }
     })
@@ -191,9 +204,9 @@ export default function AIChat({
     setMessages((prev) => [...prev, { ...msg, id }])
   }
 
-  const startStreamingMsg = (id: string, firstChunk: string) => {
+  const startStreamingMsg = (id: string, firstChunk: string, meta?: Pick<ChatMessage, 'provider' | 'model' | 'status' | 'error'>) => {
     setMessages((prev) => [...prev, {
-      id, role: 'assistant', content: firstChunk, streaming: true,
+      id, role: 'assistant', content: firstChunk, streaming: true, ...meta,
     }])
   }
 
@@ -203,9 +216,9 @@ export default function AIChat({
     ))
   }
 
-  const finalizeMsg = (id: string) => {
+  const finalizeMsg = (id: string, meta?: Pick<ChatMessage, 'status' | 'error'>) => {
     setMessages((prev) => prev.map((m) =>
-      m.id === id ? { ...m, streaming: false } : m
+      m.id === id ? { ...m, streaming: false, ...meta } : m
     ))
     setLoading(false)
   }
@@ -215,13 +228,20 @@ export default function AIChat({
     diff: { explanation: string; changes: DiffChange[]; tool_calls?: string[] },
     retryRequest?: ActionRequest,
     toolCalls?: ChatMessage['toolCalls'],
+    meta?: Pick<ChatMessage, 'provider' | 'model' | 'status' | 'error'>,
   ) => {
     setMessages((prev) => [...prev, {
-      id, role: 'assistant', content: '', streaming: false, diff, retryAction: retryRequest, toolCalls,
+      id, role: 'assistant', content: '', streaming: false, diff, retryAction: retryRequest, toolCalls, ...meta,
     }])
   }
 
-  const addAssistantMsg = (id: string, content: string, sources?: ChatMessage['sources'], toolCalls?: ChatMessage['toolCalls']) => {
+  const addAssistantMsg = (
+    id: string,
+    content: string,
+    sources?: ChatMessage['sources'],
+    toolCalls?: ChatMessage['toolCalls'],
+    meta?: Pick<ChatMessage, 'provider' | 'model' | 'status' | 'error'>,
+  ) => {
     setMessages((prev) => [...prev, {
       id,
       role: 'assistant',
@@ -229,6 +249,7 @@ export default function AIChat({
       streaming: false,
       sources,
       toolCalls,
+      ...meta,
     }])
   }
 
@@ -252,6 +273,50 @@ export default function AIChat({
             {toolName}
           </span>
         ))}
+      </div>
+    )
+  }
+
+  const renderAuditMeta = (message: ChatMessage) => {
+    const values = [message.provider, message.model, message.status].filter(Boolean) as string[]
+    if (values.length === 0 && !message.error) return null
+
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxWidth: '100%' }}>
+        {values.map((value, index) => (
+          <span
+            key={`${message.id}-audit-${value}-${index}`}
+            style={{
+              fontSize: 10,
+              color: C.textMuted,
+              background: C.bgSurface,
+              border: `1px solid ${C.border}`,
+              borderRadius: 999,
+              padding: '3px 7px',
+            }}
+          >
+            {value}
+          </span>
+        ))}
+        {message.error && (
+          <span
+            style={{
+              fontSize: 10,
+              color: C.red,
+              background: C.redSubtle,
+              border: `1px solid ${C.red}`,
+              borderRadius: 999,
+              padding: '3px 7px',
+              maxWidth: 280,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={message.error}
+          >
+            {message.error}
+          </span>
+        )}
       </div>
     )
   }
@@ -285,16 +350,16 @@ export default function AIChat({
       },
       () => {
         abortControllerRef.current = null
-        finalizeMsg(responseId)
-        broadcast({ event: 'done', action_id: aid })
+        finalizeMsg(responseId, { status: 'completed' })
+        broadcast({ event: 'done', action_id: aid, status: 'completed' })
       },
       (err) => {
         abortControllerRef.current = null
         const errorChunk = `**Error:** ${err}`
-        if (!started) startStreamingMsg(responseId, errorChunk)
+        if (!started) startStreamingMsg(responseId, errorChunk, { status: 'failed', error: err })
         else appendChunk(responseId, errorChunk)
-        finalizeMsg(responseId)
-        broadcast({ event: 'done', action_id: aid })
+        finalizeMsg(responseId, { status: 'failed', error: err })
+        broadcast({ event: 'done', action_id: aid, status: 'failed', error: err })
       },
       controller.signal,
     )
@@ -331,6 +396,11 @@ export default function AIChat({
         res.data.content || '',
         res.data.sources || undefined,
         Array.isArray(res.data.tools_used) ? res.data.tools_used : undefined,
+        {
+          provider: res.data.provider || undefined,
+          model: res.data.model || undefined,
+          status: res.data.status || undefined,
+        },
       )
       broadcast({
         event: 'agent_result',
@@ -338,10 +408,21 @@ export default function AIChat({
         content: res.data.content || '',
         sources: res.data.sources || undefined,
         tool_calls: Array.isArray(res.data.tools_used) ? res.data.tools_used : undefined,
+        provider: res.data.provider || undefined,
+        model: res.data.model || undefined,
+        status: res.data.status || undefined,
       })
     } catch (err: any) {
       const detail = err?.response?.data?.detail
-      addAssistantMsg(`${aid}-res`, `**Error:** ${typeof detail === 'string' ? detail : 'Agent request failed.'}`)
+      const error = typeof detail === 'string' ? detail : 'Agent request failed.'
+      addAssistantMsg(`${aid}-res`, `**Error:** ${error}`, undefined, undefined, { status: 'failed', error })
+      broadcast({
+        event: 'agent_result',
+        action_id: aid,
+        content: `**Error:** ${error}`,
+        status: 'failed',
+        error,
+      })
     } finally {
       setLoading(false)
     }
@@ -390,9 +471,23 @@ export default function AIChat({
         })
       }
       const toolCalls = Array.isArray(res.data.tool_calls) ? res.data.tool_calls : undefined
-      addDiff(`${aid}-diff`, res.data, request, toolCalls)
-      broadcast({ event: 'diff', diff: res.data, tool_calls: toolCalls, action_id: aid, action_request: request })
-    } catch {
+      const meta = {
+        provider: res.data.provider || undefined,
+        model: res.data.model || undefined,
+        status: res.data.status || undefined,
+      }
+      addDiff(`${aid}-diff`, res.data, request, toolCalls, meta)
+      broadcast({
+        event: 'diff',
+        diff: res.data,
+        tool_calls: toolCalls,
+        action_id: aid,
+        action_request: request,
+        ...meta,
+      })
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      const error = typeof detail === 'string' ? detail : undefined
       const explanation = request.type === 'equation'
         ? 'Could not generate equation.'
         : request.type === 'translate'
@@ -400,8 +495,16 @@ export default function AIChat({
           : request.type === 'suggest'
             ? 'Could not fetch suggestions.'
             : `Could not ${request.type}.`
-      const fallbackDiff = { explanation, changes: [] }
-      addDiff(`${aid}-diff`, fallbackDiff, request)
+      const fallbackDiff = { explanation: error || explanation, changes: [] }
+      addDiff(`${aid}-diff`, fallbackDiff, request, undefined, { status: 'failed', error })
+      broadcast({
+        event: 'diff',
+        diff: fallbackDiff,
+        action_id: aid,
+        action_request: request,
+        status: 'failed',
+        error,
+      })
     } finally {
       setLoading(false)
     }
@@ -706,9 +809,11 @@ export default function AIChat({
                   ) : m.content ? (
                     <div style={userBubble}>{m.content}</div>
                   ) : null}
+                  {renderAuditMeta(m)}
                 </div>
               ) : m.diff ? (
                 <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {renderAuditMeta(m)}
                   {renderToolCalls(m.toolCalls)}
                   <DiffView
                     explanation={m.diff.explanation}
@@ -732,6 +837,7 @@ export default function AIChat({
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: '100%' }}>
+                  {renderAuditMeta(m)}
                   <div style={botBubble}>
                     <MarkdownMessage content={m.content} onInsertText={onInsertText} />
                     {m.streaming && <span style={{ opacity: 0.4, fontSize: 12 }}>▊</span>}
