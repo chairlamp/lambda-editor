@@ -41,7 +41,7 @@ describe("streamAI SSE parser", () => {
     const onDone = vi.fn();
     const onError = vi.fn();
 
-    await streamAI("/t", {}, (c) => chunks.push(c), onDone, onError);
+    await streamAI("/t", {}, (c) => chunks.push(c), onDone, onError, vi.fn());
 
     expect(chunks).toEqual(["Hello", " world"]);
     expect(onDone).toHaveBeenCalledOnce();
@@ -55,7 +55,7 @@ describe("streamAI SSE parser", () => {
     ]));
 
     const chunks: string[] = [];
-    await streamAI("/t", {}, (c) => chunks.push(c), vi.fn(), vi.fn());
+    await streamAI("/t", {}, (c) => chunks.push(c), vi.fn(), vi.fn(), vi.fn());
     expect(chunks).toEqual(["line-a\nline-b"]);
   });
 
@@ -71,7 +71,7 @@ describe("streamAI SSE parser", () => {
     const onError = vi.fn();
     const onDone = vi.fn();
 
-    await streamAI("/t", {}, (c) => chunks.push(c), onDone, onError);
+    await streamAI("/t", {}, (c) => chunks.push(c), onDone, onError, vi.fn());
 
     expect(chunks).toEqual(["before"]);
     expect(onError).toHaveBeenCalledWith("stream_failed");
@@ -87,7 +87,7 @@ describe("streamAI SSE parser", () => {
     ]));
 
     const chunks: string[] = [];
-    await streamAI("/t", {}, (c) => chunks.push(c), vi.fn(), vi.fn());
+    await streamAI("/t", {}, (c) => chunks.push(c), vi.fn(), vi.fn(), vi.fn());
     expect(chunks).toEqual(["hi"]);
   });
 
@@ -98,7 +98,7 @@ describe("streamAI SSE parser", () => {
     ]));
 
     const chunks: string[] = [];
-    await streamAI("/t", {}, (c) => chunks.push(c), vi.fn(), vi.fn());
+    await streamAI("/t", {}, (c) => chunks.push(c), vi.fn(), vi.fn(), vi.fn());
     expect(chunks).toEqual(["hi"]);
   });
 
@@ -108,21 +108,23 @@ describe("streamAI SSE parser", () => {
     ));
 
     const onError = vi.fn();
-    await streamAI("/t", {}, vi.fn(), vi.fn(), onError);
+    await streamAI("/t", {}, vi.fn(), vi.fn(), onError, vi.fn());
 
     expect(onError).toHaveBeenCalledWith("Request failed: 500");
   });
 
-  it("treats an AbortError as a clean done, not an error", async () => {
+  it("routes AbortError to onCancelled and skips onDone/onError", async () => {
     const err = new DOMException("aborted", "AbortError");
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(err));
 
     const onDone = vi.fn();
     const onError = vi.fn();
+    const onCancelled = vi.fn();
 
-    await streamAI("/t", {}, vi.fn(), onDone, onError);
+    await streamAI("/t", {}, vi.fn(), onDone, onError, onCancelled);
 
-    expect(onDone).toHaveBeenCalledOnce();
+    expect(onCancelled).toHaveBeenCalledOnce();
+    expect(onDone).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
   });
 });

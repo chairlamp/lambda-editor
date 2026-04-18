@@ -8,6 +8,7 @@ from app.websocket.manager import manager, _user_color
 from app.models.ai_chat import AIChatMessage
 from app.models.document import Document
 from app.models.project import ProjectMember
+from app.services.ai_audit import AI_STATUS_SUBMITTED, infer_provider_model
 
 
 async def handle_room(
@@ -85,6 +86,7 @@ async def handle_room(
                     action_id = msg.get("action_id")
                     if action_id:
                         existing = await db.get(AIChatMessage, action_id)
+                        provider, model = infer_provider_model(action_type=msg.get("action_type"))
                         if not existing:
                             db.add(AIChatMessage(
                                 id=action_id,
@@ -95,7 +97,18 @@ async def handle_room(
                                 action_type=msg.get("action_type"),
                                 action_prompt=msg.get("action_prompt"),
                                 quotes_json=json.dumps(msg.get("quotes")) if msg.get("quotes") is not None else None,
+                                provider=provider,
+                                model=model,
+                                status=AI_STATUS_SUBMITTED,
                             ))
+                            await db.commit()
+                        else:
+                            if not existing.provider:
+                                existing.provider = provider
+                            if not existing.model:
+                                existing.model = model
+                            if not existing.status:
+                                existing.status = AI_STATUS_SUBMITTED
                             await db.commit()
                 await room.broadcast(
                     {**msg, "user_id": user_id, "username": username},

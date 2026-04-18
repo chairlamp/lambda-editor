@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Save, Wifi, WifiOff, Loader2, History, ArrowLeft, Bot, Eye, Lock, Link, Copy, Check, Trash2, Plus, X, Users, UserPlus, CloudOff, Cloud } from 'lucide-react'
+import { Save, Wifi, WifiOff, Loader2, History, ArrowLeft, Bot, Eye, Lock, Link, Copy, Check, Trash2, Plus, X, Users, UserPlus, CloudOff, Cloud, AlertTriangle } from 'lucide-react'
 import { useStore, Presence } from '../store/useStore'
 import { authApi, docsApi, projectsApi } from '../services/api'
 import { C } from '../design'
 import ThemeToggle from './ThemeToggle'
+import { createSaveFingerprint, saveEventMatchesContent } from '../utils/save-state'
 
 interface Props {
   onToggleAI: () => void
@@ -55,7 +56,7 @@ export default function Toolbar({
   viewMode, onChangeViewMode,
 }: Props) {
   const navigate = useNavigate()
-  const { currentDoc, currentProject, user, isConnected, presence, logout, saveStatus, typingUsers } = useStore()
+  const { currentDoc, currentProject, user, isConnected, presence, logout, saveStatus, saveError, typingUsers, setSaveState, updateDocSyncState } = useStore()
   const [saving, setSaving] = useState(false)
   const [showAddMember, setShowAddMember] = useState(false)
   const [addMemberInput, setAddMemberInput] = useState('')
@@ -75,8 +76,22 @@ export default function Toolbar({
   const saveDoc = async () => {
     if (!currentDoc || !projectId || saving || readOnly) return
     setSaving(true)
+    setSaveState('saving')
     try {
-      await docsApi.update(projectId, currentDoc.id, { content: currentDoc.content })
+      const response = await docsApi.update(projectId, currentDoc.id, { content: currentDoc.content })
+      const fingerprint = createSaveFingerprint(response.data.content || '')
+      updateDocSyncState({
+        content_revision: response.data.content_revision,
+        updated_at: response.data.updated_at,
+      })
+      if (saveEventMatchesContent(useStore.getState().currentDoc?.content || '', {
+        content_hash: fingerprint.contentHash,
+        content_length: fingerprint.contentLength,
+      })) {
+        setSaveState('saved')
+      }
+    } catch (err: any) {
+      setSaveState('error', err?.response?.data?.detail || 'Could not persist document changes.')
     } finally {
       setSaving(false)
     }
@@ -238,10 +253,15 @@ export default function Toolbar({
         </div>
 
         {isEditableDoc && !readOnly && saveStatus !== 'idle' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: 3 }}
+            title={saveStatus === 'error' ? (saveError || 'Could not persist document changes.') : undefined}
+          >
             {saveStatus === 'saving'
               ? <><CloudOff size={10} color={C.textMuted} /><span style={{ fontSize: 10.5, color: C.textMuted }}>Saving…</span></>
-              : <><Cloud size={10} color={C.green} /><span style={{ fontSize: 10.5, color: C.green }}>Saved</span></>
+              : saveStatus === 'error'
+                ? <><AlertTriangle size={10} color={C.red} /><span style={{ fontSize: 10.5, color: C.red }}>Save failed</span></>
+                : <><Cloud size={10} color={C.green} /><span style={{ fontSize: 10.5, color: C.green }}>Saved</span></>
             }
           </div>
         )}

@@ -41,7 +41,7 @@ export interface Presence {
   read_only?: boolean
 }
 
-export type SaveStatus = 'idle' | 'saving' | 'saved'
+export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
 export interface TypingUser {
   user_id: string
@@ -77,6 +77,7 @@ interface AppState {
   compileLog: string
   isCompiling: boolean
   saveStatus: SaveStatus
+  saveError: string | null
   typingUsers: TypingUser[]
 
   setUser: (user: User | null, token: string | null) => void
@@ -96,7 +97,7 @@ interface AppState {
   setConnected: (v: boolean) => void
   setCompiledPdf: (pdf: string | null, log: string) => void
   setCompiling: (v: boolean) => void
-  setSaveStatus: (status: SaveStatus) => void
+  setSaveState: (status: SaveStatus, error?: string | null) => void
   setTypingUser: (user: TypingUser, isTyping: boolean) => void
   clearTypingUsers: () => void
   logout: () => void
@@ -119,6 +120,7 @@ export const useStore = create<AppState>((set) => ({
   compileLog: '',
   isCompiling: false,
   saveStatus: 'idle',
+  saveError: null,
   typingUsers: [],
 
   setUser: (user, token) => {
@@ -158,7 +160,7 @@ export const useStore = create<AppState>((set) => ({
     documents: s.documents.filter((d) => d.id !== docId),
     currentDoc: s.currentDoc?.id === docId ? null : s.currentDoc,
   })),
-  setCurrentDoc: (currentDoc) => set({ currentDoc }),
+  setCurrentDoc: (currentDoc) => set({ currentDoc, saveStatus: 'idle', saveError: null }),
   updateDocContent: (content) =>
     set((s) => s.currentDoc ? { currentDoc: { ...s.currentDoc, content } } : {}),
   updateDocSyncState: (data) =>
@@ -169,7 +171,7 @@ export const useStore = create<AppState>((set) => ({
   setConnected: (isConnected) => set({ isConnected }),
   setCompiledPdf: (compiledPdf, compileLog) => set({ compiledPdf, compileLog }),
   setCompiling: (isCompiling) => set({ isCompiling }),
-  setSaveStatus: (saveStatus) => set({ saveStatus }),
+  setSaveState: (saveStatus, saveError = null) => set({ saveStatus, saveError: saveStatus === 'error' ? (saveError ?? 'Could not persist document changes.') : null }),
   setTypingUser: (user, isTyping) => set((s) => {
     if (isTyping) {
       const already = s.typingUsers.some((u) => u.user_id === user.user_id)
@@ -189,6 +191,8 @@ export const useStore = create<AppState>((set) => ({
       currentProject: null,
       documents: [],
       currentDoc: null,
+      saveStatus: 'idle',
+      saveError: null,
     })
   },
 }))

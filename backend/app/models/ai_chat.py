@@ -24,6 +24,10 @@ class AIChatMessage(Base):
     retry_action_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     accepted_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     rejected_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    provider: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
     document: Mapped["Document"] = relationship("Document", back_populates="ai_messages")
