@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const apiMocks = vi.hoisted(() => ({
@@ -108,5 +108,58 @@ describe("AIChat cancellation", () => {
 
     expect(await screen.findAllByText("Cancelled by user")).not.toHaveLength(0);
     expect(screen.getByText("cancelled")).toBeInTheDocument();
+  });
+
+  it("warns when a suggestion no longer matches the current document and rechecks on collaboration updates", async () => {
+    let documentContent = "\\section{Background}\nHello world";
+    let observer: (() => void) | null = null;
+    const ydoc = {
+      getText: () => ({
+        toString: () => documentContent,
+        delete: vi.fn(),
+        insert: vi.fn(),
+        observe: (cb: () => void) => {
+          observer = cb;
+        },
+        unobserve: vi.fn(),
+      }),
+      transact: (fn: () => void) => fn(),
+    };
+
+    apiMocks.history.mockResolvedValue({
+      data: [
+        {
+          id: "act-1-diff",
+          role: "assistant",
+          content: "",
+          diff: {
+            explanation: "Rewrite the introduction heading.",
+            changes: [
+              {
+                id: "c1",
+                description: "Rename introduction",
+                old_text: "\\section{Introduction}",
+                new_text: "\\section{Overview}",
+              },
+            ],
+          },
+          retry_action: { type: "suggest", instruction: "Tighten the introduction" },
+        },
+      ],
+    });
+
+    render(<AIChat socket={null} ydoc={ydoc as any} readOnly={false} currentDocTitle="main.tex" />);
+
+    expect(await screen.findByText(/document changed after this suggestion was generated/i)).toBeInTheDocument();
+    expect(screen.queryByTitle("Accept")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /refresh checks/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /review again/i })).toBeInTheDocument();
+
+    documentContent = "\\section{Introduction}\nHello world";
+    act(() => {
+      observer?.();
+    });
+
+    expect(await screen.findByTitle("Accept")).toBeInTheDocument();
   });
 });

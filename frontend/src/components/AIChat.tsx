@@ -45,6 +45,7 @@ export default function AIChat({
   const [equationLocation, setEquationLocation] = useState<EquationLocation | null>(null)
   const [retryAction, setRetryAction] = useState<ActionRequest | null>(null)
   const [quotes, setQuotes] = useState<QuoteItem[]>([])
+  const [, setDriftCheckVersion] = useState(0)
   const [aiDisclosureAccepted, setAiDisclosureAccepted] = useState<boolean>(() => {
     if (localStorage.getItem(disclosureKey) === 'true') return true
     return sessionStorage.getItem('ai-disclosure-accepted:v1') === 'true'
@@ -83,6 +84,27 @@ export default function AIChat({
     || err?.code === 'ERR_CANCELED'
     || err?.message === 'canceled'
   )
+
+  const refreshDriftChecks = useCallback(() => {
+    setDriftCheckVersion((prev) => prev + 1)
+  }, [])
+
+  const getCurrentDocumentContent = useCallback(() => {
+    if (ydoc) {
+      return ydoc.getText('content').toString()
+    }
+    return currentDoc?.content || ''
+  }, [currentDoc?.content, ydoc])
+
+  useEffect(() => {
+    if (!ydoc) return
+    const ytext = ydoc.getText('content')
+    const handleDocumentUpdate = () => {
+      setDriftCheckVersion((prev) => prev + 1)
+    }
+    ytext.observe(handleDocumentUpdate)
+    return () => ytext.unobserve(handleDocumentUpdate)
+  }, [ydoc])
 
   // Pull editor quotes into chat state so the editor can clear its transient selection UI.
   useEffect(() => {
@@ -751,17 +773,49 @@ export default function AIChat({
     textareaRef.current?.focus()
   }
 
+  const detectConflictedChanges = useCallback((changes: DiffChange[]) => {
+    const content = getCurrentDocumentContent()
+    return new Set(
+      changes
+        .filter((change) => change.old_text && content.indexOf(change.old_text) === -1)
+        .map((change) => change.id),
+    )
+  }, [getCurrentDocumentContent])
+
   // Apply accepted diffs through Yjs so reviews become collaborative edits instead of local patches.
   const applyChange = useCallback((change: DiffChange) => {
-    if (!ydoc) return
+    if (!ydoc) return false
     const ytext = ydoc.getText('content')
-    const content = ytext.toString()
+    const content = getCurrentDocumentContent()
     const idx = content.indexOf(change.old_text)
-    if (idx === -1) return
+    if (idx === -1) return false
     ydoc.transact(() => {
       ytext.delete(idx, change.old_text.length)
       ytext.insert(idx, change.new_text)
     })
+    return true
+  }, [getCurrentDocumentContent, ydoc])
+
+  const applyChanges = useCallback((changes: DiffChange[]) => {
+    if (!ydoc) return { appliedIds: [] as string[], conflictedIds: changes.map((change) => change.id) }
+
+    const ytext = ydoc.getText('content')
+    const appliedIds: string[] = []
+    const conflictedIds: string[] = []
+    ydoc.transact(() => {
+      for (const change of changes) {
+        const content = ytext.toString()
+        const idx = content.indexOf(change.old_text)
+        if (change.old_text && idx === -1) {
+          conflictedIds.push(change.id)
+          continue
+        }
+        ytext.delete(idx, change.old_text.length)
+        ytext.insert(idx, change.new_text)
+        appliedIds.push(change.id)
+      }
+    })
+    return { appliedIds, conflictedIds }
   }, [ydoc])
 
   const persistReviewState = useCallback((messageId: string, nextAccepted: Set<string>, nextRejected: Set<string>) => {
@@ -777,7 +831,10 @@ export default function AIChat({
 
   const handleAccept = useCallback((id: string, change: DiffChange) => {
     if (!canReviewDiffs) return
-    applyChange(change)
+    if (!applyChange(change)) {
+      refreshDriftChecks()
+      return
+    }
     setAccepted((prev) => {
       const m = new Map(prev)
       const nextAccepted = new Set([...(m.get(id) ?? []), change.id])
@@ -795,7 +852,7 @@ export default function AIChat({
       else m.delete(id)
       return m
     })
-  }, [applyChange, canReviewDiffs, persistReviewState, rejected])
+  }, [applyChange, canReviewDiffs, persistReviewState, refreshDriftChecks, rejected])
 
   const handleReject = useCallback((id: string, changeId: string) => {
     if (!canReviewDiffs) return
@@ -820,22 +877,22 @@ export default function AIChat({
 
   const handleAcceptAll = useCallback((id: string, changes: DiffChange[]) => {
     if (!canReviewDiffs || !ydoc) return
-    const ytext = ydoc.getText('content')
-    ydoc.transact(() => {
-      for (const change of changes) {
-        const content = ytext.toString()
-        const idx = content.indexOf(change.old_text)
-        if (idx === -1) continue
-        ytext.delete(idx, change.old_text.length)
-        ytext.insert(idx, change.new_text)
-      }
-    })
-    const nextAccepted = new Set(changes.map((c) => c.id))
-    const nextRejected = new Set<string>()
+    const { appliedIds, conflictedIds } = applyChanges(changes)
+    if (conflictedIds.length > 0) refreshDriftChecks()
+    if (appliedIds.length === 0) return
+
+    const nextAccepted = new Set([...(accepted.get(id) ?? []), ...appliedIds])
+    const nextRejected = new Set(rejected.get(id) ?? [])
+    appliedIds.forEach((changeId) => nextRejected.delete(changeId))
     setAccepted((prev) => { const m = new Map(prev); m.set(id, nextAccepted); return m })
-    setRejected((prev) => { const m = new Map(prev); m.delete(id); return m })
+    setRejected((prev) => {
+      const m = new Map(prev)
+      if (nextRejected.size > 0) m.set(id, nextRejected)
+      else m.delete(id)
+      return m
+    })
     persistReviewState(id, nextAccepted, nextRejected)
-  }, [canReviewDiffs, ydoc, persistReviewState])
+  }, [accepted, applyChanges, canReviewDiffs, persistReviewState, refreshDriftChecks, rejected, ydoc])
 
   const handleRejectAll = useCallback((id: string, changes: DiffChange[]) => {
     if (!canReviewDiffs) return
@@ -927,6 +984,7 @@ export default function AIChat({
         {messages.map((m) => {
           const isUser = m.role === 'user'
           const messageActionType = inferActionType(m.actionType, m.suggestInstruction, m.actionLabel)
+          const diffConflicts = m.diff ? detectConflictedChanges(m.diff.changes) : new Set<string>()
           const authorName = isUser
             ? (m.fromUser || user?.username || 'You')
             : 'Lambda AI Chatbot'
@@ -988,11 +1046,13 @@ export default function AIChat({
                     changes={m.diff.changes}
                     accepted={accepted.get(m.id) ?? new Set()}
                     rejected={rejected.get(m.id) ?? new Set()}
+                    conflicted={diffConflicts}
                     onAccept={(c) => handleAccept(m.id, c)}
                     onReject={(id) => handleReject(m.id, id)}
                     onAcceptAll={() => handleAcceptAll(m.id, m.diff!.changes)}
                     onRejectAll={() => handleRejectAll(m.id, m.diff!.changes)}
                     canReview={canReviewDiffs}
+                    onRefreshConflicts={refreshDriftChecks}
                     onAskDifferent={m.retryAction ? () => {
                       if (canReviewDiffs) handleRejectAll(m.id, m.diff!.changes)
                       setRetryAction(m.retryAction!)
