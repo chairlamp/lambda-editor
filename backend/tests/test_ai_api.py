@@ -5,6 +5,7 @@ import pytest
 
 from app.api import ai as ai_module
 from app.services import ai_service
+from app.services import agent_service
 from app.config import settings
 from app.services.ai_cancellation import AICancelledError
 from app.websocket.manager import manager
@@ -84,6 +85,62 @@ async def test_streaming_ai_generation_persists_history(client, monkeypatch):
     assert history_by_id["act-1-res"]["provider"] == settings.llm_provider
     assert history_by_id["act-1-res"]["model"] == settings.llm_model
     assert history_by_id["act-1-res"]["status"] == "completed"
+
+
+async def test_streaming_agent_chat_persists_history_and_metadata(client, monkeypatch):
+    await _register(client, "agent-owner@example.com", "agent-owner")
+    project = await _create_project(client, "Agent Stream")
+
+    async def fake_agent_chat(prompt: str, document_context: str = "", result_holder=None):
+        assert prompt == "Explain the introduction"
+        assert document_context == "current"
+        if result_holder is not None:
+            result_holder.update({
+                "content": "This is a streamed agent response with metadata attached for the chat history view.",
+                "sources": [{"title": "Docs", "url": "https://example.com/docs"}],
+                "tools_used": ["research_topic"],
+            })
+        yield "This is a streamed agent response with "
+        yield "metadata attached for the chat history view."
+
+    monkeypatch.setattr(agent_service, "stream_tool_enabled_chat", fake_agent_chat)
+
+    async with client.stream(
+        "POST",
+        f"/projects/{project['id']}/documents/{project['main_doc_id']}/ai/message-streams",
+        json={
+            "prompt": "Explain the introduction",
+            "document_context": "current",
+            "action_id": "act-agent-stream",
+        },
+    ) as response:
+        assert response.status_code == 200
+        body = ""
+        async for chunk in response.aiter_text():
+            body += chunk
+
+    assert body.count('data: "') >= 2
+    assert "data: [DONE]" in body
+
+    history_response = await client.get(
+        f"/projects/{project['id']}/documents/{project['main_doc_id']}/ai/messages"
+    )
+    assert history_response.status_code == 200
+    history = history_response.json()
+    history_by_id = {message["id"]: message for message in history}
+
+    assert history_by_id["act-agent-stream"]["role"] == "user"
+    assert history_by_id["act-agent-stream"]["content"] == "Explain the introduction"
+    assert history_by_id["act-agent-stream"]["status"] == "submitted"
+
+    assistant_message = history_by_id["act-agent-stream-res"]
+    assert assistant_message["role"] == "assistant"
+    assert assistant_message["content"] == "This is a streamed agent response with metadata attached for the chat history view."
+    assert assistant_message["sources"] == [{"title": "Docs", "url": "https://example.com/docs"}]
+    assert assistant_message["tool_calls"] == ["research_topic"]
+    assert assistant_message["provider"] == settings.llm_provider
+    assert assistant_message["model"] == settings.llm_model
+    assert assistant_message["status"] == "completed"
 
 
 async def test_ai_diff_history_and_review_state_are_persisted(client_factory, monkeypatch):

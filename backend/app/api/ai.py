@@ -642,6 +642,120 @@ async def agent_chat(
     }
 
 
+@router.post("/projects/{project_id}/documents/{doc_id}/ai/message-streams")
+async def agent_chat_stream(
+    request: Request,
+    project_id: str,
+    doc_id: str,
+    req: AgentRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_document_edit_access(project_id, doc_id, current_user.id, db)
+    await _persist_user_message(
+        db,
+        current_user.id,
+        project_id,
+        doc_id,
+        req.action_id,
+        content=req.prompt,
+        action_prompt=req.prompt,
+    )
+
+    result_holder: dict[str, object] = {}
+
+    async def stream_result():
+        try:
+            async for chunk in agent_service.stream_tool_enabled_chat(
+                req.prompt,
+                req.document_context or "",
+                result_holder,
+            ):
+                yield chunk
+        finally:
+            clear_action_cancelled(req.action_id)
+
+    async def on_complete(content: str):
+        provider, model = infer_provider_model(tool_calls=result_holder.get("tools_used") or None)
+        sources = result_holder.get("sources") or None
+        tool_calls = result_holder.get("tools_used") or None
+        resolved_content = str(result_holder.get("content") or content or "")
+        await _persist_assistant_message(
+            db,
+            current_user.id,
+            project_id,
+            doc_id,
+            f"{req.action_id}-res" if req.action_id else None,
+            content=resolved_content,
+            sources=sources,
+            tool_calls=tool_calls,
+            provider=provider,
+            model=model,
+            status=AI_STATUS_COMPLETED,
+        )
+        await manager.broadcast_to_room(
+            doc_id,
+            {
+                "type": "ai_chat",
+                "event": "agent_result",
+                "action_id": req.action_id,
+                "username": current_user.username,
+                "content": resolved_content,
+                "sources": sources,
+                "tool_calls": tool_calls,
+                "provider": provider,
+                "model": model,
+                "status": AI_STATUS_COMPLETED,
+            },
+            exclude=current_user.id,
+        )
+
+    async def on_error(error: str):
+        await _persist_assistant_message(
+            db,
+            current_user.id,
+            project_id,
+            doc_id,
+            f"{req.action_id}-res" if req.action_id else None,
+            content="",
+            status=AI_STATUS_FAILED,
+            error_message=error,
+        )
+        await manager.broadcast_to_room(
+            doc_id,
+            {
+                "type": "ai_chat",
+                "event": "agent_result",
+                "action_id": req.action_id,
+                "username": current_user.username,
+                "content": f"**Error:** {error}",
+                "status": AI_STATUS_FAILED,
+                "error": error,
+            },
+            exclude=current_user.id,
+        )
+
+    return _sse(
+        request,
+        stream_result(),
+        on_complete=on_complete,
+        on_error=on_error,
+        on_cancel=lambda content: _persist_cancelled_action(
+            db,
+            current_user.id,
+            project_id,
+            doc_id,
+            req.action_id,
+            f"{req.action_id}-res" if req.action_id else None,
+            partial_content=content,
+        ),
+        doc_id=doc_id,
+        action_id=req.action_id,
+        broadcast_exclude_user_id=current_user.id,
+        actor_username=current_user.username,
+    )
+
+
 @router.post("/projects/{project_id}/documents/{doc_id}/ai/rewrites")
 async def rewrite(
     request: Request,

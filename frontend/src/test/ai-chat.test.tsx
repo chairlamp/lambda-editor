@@ -162,4 +162,69 @@ describe("AIChat cancellation", () => {
 
     expect(await screen.findByTitle("Accept")).toBeInTheDocument();
   });
+
+  it("streams normal chat replies and hydrates audit metadata after completion", async () => {
+    const fixedNow = 1700000000000;
+    const fixedRandom = 0.123456789;
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(fixedNow);
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(fixedRandom);
+    try {
+      const actionId = `${fixedNow}-${fixedRandom.toString(36).slice(2)}`;
+      apiMocks.history
+        .mockResolvedValueOnce({ data: [] })
+        .mockResolvedValueOnce({
+          data: [
+            {
+              id: `${actionId}-res`,
+              role: "assistant",
+              content: "Hello world",
+              sources: [{ title: "Docs", url: "https://example.com/docs" }],
+              tool_calls: ["research_topic"],
+              provider: "openai",
+              model: "gpt-4.1",
+              status: "completed",
+            },
+          ],
+        });
+
+      apiMocks.streamAI.mockImplementation(
+        async (
+          endpoint: string,
+          _body: unknown,
+          onChunk: (chunk: string) => void,
+          onDone: () => void,
+        ) => {
+          expect(endpoint).toBe("/projects/proj-1/documents/doc-1/ai/message-streams");
+          onChunk("Hello ");
+          onChunk("world");
+          onDone();
+        },
+      );
+
+      render(<AIChat socket={null} readOnly={false} currentDocTitle="main.tex" />);
+
+      await waitFor(() => {
+        expect(apiMocks.history).toHaveBeenCalledWith("proj-1", "doc-1");
+      });
+
+      const textarea = screen.getByPlaceholderText("Message…");
+      fireEvent.change(textarea, { target: { value: "Explain the intro" } });
+      fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
+
+      expect((await screen.findAllByText("Hello world")).length).toBeGreaterThan(0);
+
+      await waitFor(() => {
+        expect(apiMocks.streamAI).toHaveBeenCalledTimes(1);
+        expect(apiMocks.history).toHaveBeenCalledTimes(2);
+      });
+
+      expect(screen.getByText("openai")).toBeInTheDocument();
+      expect(screen.getByText("gpt-4.1")).toBeInTheDocument();
+      expect(screen.getByText("research_topic")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Docs" })).toHaveAttribute("href", "https://example.com/docs");
+    } finally {
+      nowSpy.mockRestore();
+      randomSpy.mockRestore();
+    }
+  });
 });

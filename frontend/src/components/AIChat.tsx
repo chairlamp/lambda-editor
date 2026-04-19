@@ -276,8 +276,9 @@ export default function AIChat({
           error: msg.error || undefined,
         }])
       } else if (event === 'agent_result') {
-        setMessages((prev) => prev.some((m) => m.id === `${actionId}-res`) ? prev : [...prev, {
-          id: `${actionId}-res`,
+        const responseId = `${actionId}-res`
+        const nextMessage: ChatMessage = {
+          id: responseId,
           role: 'assistant',
           content: msg.content || '',
           sources: msg.sources || undefined,
@@ -287,7 +288,14 @@ export default function AIChat({
           model: msg.model || undefined,
           status: msg.status || undefined,
           error: msg.error || undefined,
-        }])
+        }
+        setMessages((prev) => {
+          const existing = prev.find((message) => message.id === responseId)
+          if (!existing) return [...prev, nextMessage]
+          return prev.map((message) => (
+            message.id === responseId ? { ...message, ...nextMessage } : message
+          ))
+        })
       }
     })
     return () => off()
@@ -344,6 +352,18 @@ export default function AIChat({
       toolCalls,
       ...meta,
     }])
+  }
+
+  const upsertAssistantMsg = (message: ChatMessage) => {
+    setMessages((prev) => {
+      const existing = prev.find((entry) => entry.id === message.id)
+      if (!existing) return [...prev, message]
+      return prev.map((entry) => (
+        entry.id === message.id
+          ? { ...entry, ...message, streaming: false }
+          : entry
+      ))
+    })
   }
 
   const markCancelled = (
@@ -468,17 +488,32 @@ export default function AIChat({
     abortControllerRef.current = null
   }
 
+  const hydrateAssistantMessage = useCallback(async (responseId: string) => {
+    if (!currentDoc?.project_id || !currentDoc?.id) return
+    try {
+      const res = await aiChatApi.history(currentDoc.project_id, currentDoc.id)
+      const stored = (Array.isArray(res.data) ? res.data : []).find((message: any) => message.id === responseId)
+      if (!stored) return
+      const message = mapStoredMessage(stored)
+      if (message.role !== 'assistant') return
+      upsertAssistantMsg({ ...message, streaming: false })
+    } catch {
+      // Best-effort metadata hydration should not interrupt the active chat flow.
+    }
+  }, [currentDoc?.id, currentDoc?.project_id])
+
   // Share chunks as they arrive so collaborators do not wait for the final response.
   const runStream = async (
     endpoint: string,
     payload: Record<string, unknown>,
     aid: string,
-  ) => {
+  ): Promise<'completed' | 'failed' | 'cancelled'> => {
     const controller = new AbortController()
     abortControllerRef.current = controller
     const responseId = `${aid}-res`
     activeRequestRef.current = { actionId: aid, responseId, kind: 'assistant' }
     let started = false
+    let outcome: 'completed' | 'failed' | 'cancelled' = 'completed'
     await streamAI(
       endpoint,
       payload,
@@ -495,6 +530,7 @@ export default function AIChat({
         finalizeMsg(responseId, { status: 'completed' })
       },
       (err) => {
+        outcome = 'failed'
         clearActiveRequest()
         const errorChunk = `**Error:** ${err}`
         if (!started) startStreamingMsg(responseId, errorChunk, { status: 'failed', error: err })
@@ -502,11 +538,13 @@ export default function AIChat({
         finalizeMsg(responseId, { status: 'failed', error: err })
       },
       () => {
+        outcome = 'cancelled'
         clearActiveRequest()
         markCancelled(responseId, 'assistant')
       },
       controller.signal,
     )
+    return outcome
   }
 
   const sendMessage = async () => {
@@ -530,62 +568,18 @@ export default function AIChat({
     addUserMsg({ role: 'user', content: text, quotes: currentQuotes }, aid)
     broadcast({ event: 'user_msg', content: text, quotes: currentQuotes, action_id: aid })
     const responseId = `${aid}-res`
-    const controller = new AbortController()
-    abortControllerRef.current = controller
-    activeRequestRef.current = { actionId: aid, responseId, kind: 'assistant' }
-    try {
-      const res = await aiChatApi.agent(currentDoc?.project_id || '', currentDoc?.id || '', {
+    const outcome = await runStream(
+      `/projects/${currentDoc?.project_id}/documents/${currentDoc?.id}/ai/message-streams`,
+      {
         prompt: fullPrompt,
         document_context: currentDoc?.content ?? '',
         action_id: aid,
-      }, controller.signal)
-      addAssistantMsg(
-        responseId,
-        res.data.content || '',
-        res.data.sources || undefined,
-        Array.isArray(res.data.tools_used) ? res.data.tools_used : undefined,
-        {
-          provider: res.data.provider || undefined,
-          model: res.data.model || undefined,
-          status: res.data.status || undefined,
-        },
-      )
-      broadcast({
-        event: 'agent_result',
-        action_id: aid,
-        content: res.data.content || '',
-        sources: res.data.sources || undefined,
-        tool_calls: Array.isArray(res.data.tools_used) ? res.data.tools_used : undefined,
-        provider: res.data.provider || undefined,
-        model: res.data.model || undefined,
-        status: res.data.status || undefined,
-      })
-    } catch (err: any) {
-      if (isAbortError(err)) {
-        markCancelled(responseId, 'assistant')
-        broadcast({
-          event: 'cancelled',
-          action_id: aid,
-          response_id: responseId,
-          response_kind: 'res',
-          status: 'cancelled',
-          error: 'Cancelled by user',
-        })
-        return
-      }
-      const detail = err?.response?.data?.detail
-      const error = typeof detail === 'string' ? detail : 'Agent request failed.'
-      addAssistantMsg(responseId, `**Error:** ${error}`, undefined, undefined, { status: 'failed', error })
-      broadcast({
-        event: 'agent_result',
-        action_id: aid,
-        content: `**Error:** ${error}`,
-        status: 'failed',
-        error,
-      })
-    } finally {
-      clearActiveRequest()
-      setLoading(false)
+      },
+      aid,
+    )
+
+    if (outcome !== 'cancelled') {
+      await hydrateAssistantMessage(responseId)
     }
   }
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+from collections.abc import AsyncIterator
 from typing import Any, Optional
 
 import httpx
@@ -194,6 +196,65 @@ async def _responses_create(payload: dict[str, Any]) -> dict[str, Any]:
     return response.json()
 
 
+async def _responses_stream(payload: dict[str, Any]) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    if not settings.llm_api_key:
+        raise RuntimeError(f"{settings.llm_api_key_env_name} is not configured.")
+
+    async with httpx.AsyncClient(timeout=90.0) as http:
+        async with http.stream(
+            "POST",
+            f"{settings.llm_base_url.rstrip('/')}/responses",
+            headers={
+                "Authorization": f"Bearer {settings.llm_api_key}",
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+            },
+            json={**payload, "stream": True},
+        ) as response:
+            if response.status_code >= 400:
+                detail = (await response.aread()).decode(errors="ignore").strip()
+                raise RuntimeError(detail or f"{settings.llm_provider.title()} request failed with status {response.status_code}.")
+
+            event_name = ""
+            data_lines: list[str] = []
+
+            async for raw_line in response.aiter_lines():
+                line = raw_line.strip()
+                if not line:
+                    if not data_lines and not event_name:
+                        continue
+
+                    raw = "\n".join(data_lines)
+                    data_lines = []
+                    current_event = event_name
+                    event_name = ""
+
+                    if not raw or raw == "[DONE]":
+                        continue
+
+                    try:
+                        payload_json = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+
+                    yield current_event or str(payload_json.get("type") or ""), payload_json
+                    continue
+
+                if line.startswith("event:"):
+                    event_name = line[6:].strip()
+                elif line.startswith("data:"):
+                    data_lines.append(line[5:].strip())
+
+            if data_lines or event_name:
+                raw = "\n".join(data_lines)
+                if raw and raw != "[DONE]":
+                    try:
+                        payload_json = json.loads(raw)
+                    except json.JSONDecodeError:
+                        return
+                    yield event_name or str(payload_json.get("type") or ""), payload_json
+
+
 def _tool_outputs_follow_up_input(
     prompt: str,
     document_context: str,
@@ -213,6 +274,248 @@ def _tool_outputs_follow_up_input(
         f"Tool results:\n{chr(10).join(rendered_outputs)}"
     )
     return _build_user_input(follow_up, document_context)
+
+
+def _build_agent_tools() -> list[dict[str, Any]]:
+    tools: list[dict[str, Any]] = []
+    if settings.llm_provider != "groq":
+        tools.append({"type": "web_search"})
+
+    tools.extend([
+        _function_tool(
+            "research_topic",
+            "Research a topic and return a short source-backed brief. Use this for documentation lookup, LaTeX references, academic research, or technical synthesis.",
+            {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "What to research."},
+                    "focus": {"type": "string", "description": "Optional focus or constraint for the research brief."},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        ),
+        _function_tool(
+            "translate_text",
+            "Translate text with Google Cloud Translation while preserving LaTeX commands and formatting exactly. Use ISO language codes like es, fr, de, kk, ru, or zh-CN.",
+            {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The text to translate."},
+                    "target_language": {"type": "string", "description": "Target language code, for example es, fr, de, kk, ru, or zh-CN."},
+                },
+                "required": ["text", "target_language"],
+                "additionalProperties": False,
+            },
+        ),
+    ])
+    return tools
+
+
+async def _yield_chunked_text(text: str, chunk_size: int = 32) -> AsyncIterator[str]:
+    for idx in range(0, len(text), chunk_size):
+        yield text[idx: idx + chunk_size]
+        await asyncio.sleep(0)
+
+
+async def _build_agent_tool_outputs(
+    response_json: dict[str, Any],
+    *,
+    prompt: str,
+    document_context: str,
+    sources: list[dict[str, str]],
+    tools_used: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, str]], list[str]]:
+    function_calls = [
+        item for item in (response_json.get("output", []) or [])
+        if item.get("type") == "function_call"
+    ]
+    if not function_calls:
+        return [], sources, tools_used
+
+    tool_outputs: list[dict[str, Any]] = []
+    for call in function_calls:
+        name = call.get("name")
+        arguments = call.get("arguments") or "{}"
+        logger.info("agent function call emitted: name=%r arguments=%s", name, arguments)
+        try:
+            parsed_args = json.loads(arguments)
+        except json.JSONDecodeError:
+            parsed_args = {}
+
+        result: dict[str, Any]
+        if name == "research_topic":
+            result = await _research_topic(
+                str(parsed_args.get("query") or ""),
+                str(parsed_args.get("focus") or ""),
+            )
+            sources = _normalize_sources(sources + result.get("sources", []))
+        elif name == "translate_text":
+            result = await _translate_text(
+                str(parsed_args.get("text") or ""),
+                str(parsed_args.get("target_language") or ""),
+            )
+        else:
+            result = {"error": f"Unsupported tool: {name}"}
+
+        if isinstance(name, str) and name not in tools_used:
+            tools_used.append(name)
+
+        tool_outputs.append({
+            "type": "function_call_output",
+            "call_id": call.get("call_id"),
+            "output": json.dumps(result, ensure_ascii=True),
+        })
+
+    return tool_outputs, sources, tools_used
+
+
+async def stream_tool_enabled_chat(
+    prompt: str,
+    document_context: str = "",
+    result_holder: Optional[dict[str, Any]] = None,
+) -> AsyncIterator[str]:
+    logger.info("agent stream started chars=%d has_document_context=%s", len(prompt.strip()), bool(document_context.strip()))
+    direct_translation = _detect_translation_request(prompt)
+    if direct_translation:
+        translation = await _translate_text(
+            direct_translation["text"],
+            direct_translation["target_language"],
+        )
+        content = translation.get("translation", "")
+        tools_used = ["translate_text"]
+        if result_holder is not None:
+            result_holder.update({"content": content, "sources": [], "tools_used": tools_used})
+        async for chunk in _yield_chunked_text(content):
+            yield chunk
+        return
+
+    tools = _build_agent_tools()
+    sources: list[dict[str, str]] = []
+    tools_used: list[str] = []
+    final_content = ""
+    payload: dict[str, Any] = {
+        "model": settings.llm_model,
+        "instructions": AGENT_SYSTEM_PROMPT,
+        "input": _build_user_input(prompt, document_context),
+        "tools": tools,
+    }
+
+    for turn_index in range(5):
+        streamed_chunks: list[str] = []
+        output_items: list[dict[str, Any]] = []
+        response_json: dict[str, Any] | None = None
+        response_id: str | None = None
+
+        try:
+            async for event_type, event_payload in _responses_stream(payload):
+                if event_type == "response.output_text.delta":
+                    delta = str(event_payload.get("delta") or "")
+                    if delta:
+                        streamed_chunks.append(delta)
+                        yield delta
+                    continue
+
+                if event_type == "response.output_item.done":
+                    item = event_payload.get("item")
+                    if isinstance(item, dict):
+                        output_items.append(item)
+                    continue
+
+                if event_type == "response.completed":
+                    candidate = event_payload.get("response")
+                    response_json = candidate if isinstance(candidate, dict) else event_payload
+                    continue
+
+                if event_type in {"error", "response.failed"}:
+                    message = (
+                        str(event_payload.get("message") or "")
+                        or str((event_payload.get("error") or {}).get("message") or "")
+                        or str(event_payload.get("error") or "")
+                    )
+                    raise RuntimeError(message or "stream_failed")
+
+                for candidate in (
+                    event_payload.get("response"),
+                    event_payload,
+                ):
+                    if isinstance(candidate, dict) and candidate.get("id"):
+                        response_id = str(candidate.get("id"))
+                        break
+        except RuntimeError:
+            raise
+        except Exception:
+            logger.info("agent stream falling back to buffered response for turn %d", turn_index + 1)
+            buffered_response = await _responses_create(payload)
+            if turn_index == 0:
+                response_json = buffered_response
+            else:
+                response_json = buffered_response
+            output_items = [item for item in (response_json.get("output", []) or []) if isinstance(item, dict)]
+            streamed_chunks = []
+
+        if response_json is None:
+            response_json = {"output": output_items}
+        elif output_items and not response_json.get("output"):
+            response_json["output"] = output_items
+        if response_id and not response_json.get("id"):
+            response_json["id"] = response_id
+
+        turn_content, response_sources, response_tools = _extract_text_and_sources(response_json)
+        if not streamed_chunks and turn_content:
+            async for chunk in _yield_chunked_text(turn_content):
+                streamed_chunks.append(chunk)
+                yield chunk
+        sources = _normalize_sources(sources + response_sources)
+        for tool_name in response_tools:
+            if tool_name not in tools_used:
+                tools_used.append(tool_name)
+
+        function_calls = [
+            item for item in (response_json.get("output", []) or [])
+            if item.get("type") == "function_call"
+        ]
+        if not function_calls:
+            final_content = "".join(streamed_chunks) or turn_content
+            if result_holder is not None:
+                result_holder.update({
+                    "content": final_content,
+                    "sources": sources,
+                    "tools_used": tools_used,
+                })
+            logger.info(
+                "agent stream completed tools=%s sources=%d chars=%d",
+                ",".join(tools_used) if tools_used else "none",
+                len(sources),
+                len(final_content),
+            )
+            return
+
+        tool_outputs, sources, tools_used = await _build_agent_tool_outputs(
+            response_json,
+            prompt=prompt,
+            document_context=document_context,
+            sources=sources,
+            tools_used=tools_used,
+        )
+
+        if settings.llm_provider == "groq":
+            payload = {
+                "model": settings.llm_model,
+                "instructions": AGENT_SYSTEM_PROMPT,
+                "input": _tool_outputs_follow_up_input(prompt, document_context, tool_outputs),
+            }
+        else:
+            # For OpenAI-compatible Responses follow-ups, reuse the previous response id.
+            payload = {
+                "model": settings.llm_model,
+                "instructions": AGENT_SYSTEM_PROMPT,
+                "previous_response_id": response_json.get("id"),
+                "input": tool_outputs,
+                "tools": tools,
+            }
+
+    raise RuntimeError("Agent exceeded the maximum number of tool turns.")
 
 
 async def _research_topic(query: str, focus: str = "") -> dict[str, Any]:
