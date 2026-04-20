@@ -100,6 +100,7 @@ export default function AIChat({
   const abortControllerRef = useRef<AbortController | null>(null)
   const activeRequestRef = useRef<ActiveRequestState | null>(null)
   const activeThreadIdRef = useRef('')
+  const cancelEquationLocationRef = useRef(onCancelEquationLocation)
   const { currentDoc, user } = useStore()
   const effectiveEquationLocation = equationLocation ?? pendingEquationLocation ?? null
   const canReviewDiffs = !readOnly
@@ -109,6 +110,7 @@ export default function AIChat({
   const socketRef = useRef<RoomSocket | null>(null)
   useEffect(() => { socketRef.current = socket }, [socket])
   useEffect(() => { activeThreadIdRef.current = activeThreadId }, [activeThreadId])
+  useEffect(() => { cancelEquationLocationRef.current = onCancelEquationLocation }, [onCancelEquationLocation])
 
   const broadcast = useCallback((data: Record<string, unknown>) => {
     socketRef.current?.sendAiChat({
@@ -173,8 +175,8 @@ export default function AIChat({
     setRetryAction(null)
     setActiveAction(null)
     setEquationLocation(null)
-    onCancelEquationLocation?.()
-  }, [onCancelEquationLocation])
+    cancelEquationLocationRef.current?.()
+  }, [])
 
   const refreshThreadSummaries = useCallback(async () => {
     if (!currentDoc?.id || !currentDoc.project_id) {

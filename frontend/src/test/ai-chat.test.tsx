@@ -245,7 +245,14 @@ describe("AIChat cancellation", () => {
   it("starts a real new chat thread and shows thread history", async () => {
     apiMocks.history.mockResolvedValue({ data: [] });
 
-    render(<AIChat socket={null} readOnly={false} currentDocTitle="main.tex" />);
+    const { rerender } = render(
+      <AIChat
+        socket={null}
+        readOnly={false}
+        currentDocTitle="main.tex"
+        onCancelEquationLocation={vi.fn()}
+      />,
+    );
 
     await waitFor(() => {
       expect(apiMocks.history).toHaveBeenCalledWith("proj-1", "doc-1", "thread-1");
@@ -263,6 +270,21 @@ describe("AIChat cancellation", () => {
         "doc-1",
         expect.stringMatching(/^thread-/),
       );
+    });
+    const latestThreadId = apiMocks.history.mock.calls[apiMocks.history.mock.calls.length - 1]?.[2];
+    expect(latestThreadId).not.toBe("thread-1");
+
+    rerender(
+      <AIChat
+        socket={null}
+        readOnly={false}
+        currentDocTitle="main.tex"
+        onCancelEquationLocation={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(apiMocks.history.mock.calls[apiMocks.history.mock.calls.length - 1]?.[2]).toBe(latestThreadId);
     });
 
     expect(screen.getAllByText("New chat").length).toBeGreaterThan(0);
