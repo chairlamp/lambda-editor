@@ -1060,7 +1060,7 @@ export default function AIChat({
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <Bot size={15} color={C.accent} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-            <span style={{ fontWeight: 700, fontSize: 13, color: C.textPrimary }}>AI Assistant</span>
+            <span style={{ fontWeight: 700, fontSize: 13, color: C.textPrimary }}>Lambdex</span>
             <span style={{ fontSize: 10, color: C.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>
               {activeThreadSummary?.title || 'New chat'}
             </span>
@@ -1236,7 +1236,7 @@ export default function AIChat({
           const diffConflicts = m.diff ? detectConflictedChanges(m.diff.changes) : new Set<string>()
           const authorName = isUser
             ? (m.fromUser || user?.username || 'You')
-            : 'Lambda AI Chatbot'
+            : 'Lambdex'
           return (
             <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', gap: 3 }}>
               <span style={{
