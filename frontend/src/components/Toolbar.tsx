@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Save, Wifi, WifiOff, Loader2, History, ArrowLeft, Bot, Eye, Lock, Link, Copy, Check, Trash2, Plus, X, Users, UserPlus, CloudOff, Cloud, AlertTriangle } from 'lucide-react'
+import { Save, Wifi, WifiOff, Loader2, History, ArrowLeft, Bot, Eye, Lock, Link, Copy, Check, Trash2, Plus, X, Users, UserPlus, CloudOff, Cloud, AlertTriangle, Undo2, Redo2 } from 'lucide-react'
 import { useStore, Presence } from '../store/useStore'
 import { authApi, docsApi, projectsApi } from '../services/api'
 import { C } from '../design'
@@ -16,6 +16,10 @@ interface Props {
   readOnly?: boolean
   isLatexDoc?: boolean
   isEditableDoc?: boolean
+  canUndo?: boolean
+  canRedo?: boolean
+  onUndo?: () => void
+  onRedo?: () => void
   viewMode?: 'editor' | 'split' | 'preview'
   onChangeViewMode?: (mode: 'editor' | 'split' | 'preview') => void
 }
@@ -53,6 +57,7 @@ export default function Toolbar({
   onToggleAI, showAI,
   showVersionHistory, onToggleVersionHistory,
   projectId, readOnly, isLatexDoc = true, isEditableDoc = true,
+  canUndo = false, canRedo = false, onUndo, onRedo,
   viewMode, onChangeViewMode,
 }: Props) {
   const navigate = useNavigate()
@@ -329,6 +334,27 @@ export default function Toolbar({
               )
             })}
           </div>
+        )}
+
+        {isEditableDoc && !readOnly && (
+          <>
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              style={{ ...iconBtn, opacity: canUndo ? 1 : 0.45, cursor: canUndo ? 'pointer' : 'not-allowed' }}
+              title="Undo (Ctrl/Cmd+Z)"
+            >
+              <Undo2 size={14} />
+            </button>
+            <button
+              onClick={onRedo}
+              disabled={!canRedo}
+              style={{ ...iconBtn, opacity: canRedo ? 1 : 0.45, cursor: canRedo ? 'pointer' : 'not-allowed' }}
+              title="Redo (Ctrl/Cmd+Shift+Z)"
+            >
+              <Redo2 size={14} />
+            </button>
+          </>
         )}
 
         {/* Action buttons */}

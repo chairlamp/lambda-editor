@@ -26,6 +26,7 @@ interface RemoteCursor {
 }
 
 type LatexViewMode = 'editor' | 'split' | 'preview'
+type EditorHistoryState = { canUndo: boolean; canRedo: boolean; undo: () => void; redo: () => void }
 
 const LAYOUT_KEYS = {
   sidebarWidth: 'lambda-editor:sidebar-width',
@@ -59,6 +60,7 @@ export default function EditorPage() {
 
   const socketRef = useRef<RoomSocket | null>(null)
   const textInserterRef = useRef<((text: string) => void) | null>(null)
+  const historyActionsRef = useRef<Pick<EditorHistoryState, 'undo' | 'redo'> | null>(null)
 
   const [showAI, setShowAI] = useState(true)
   const [showVersionHistory, setShowVersionHistory] = useState(false)
@@ -73,6 +75,8 @@ export default function EditorPage() {
   const [pickingEquationLocation, setPickingEquationLocation] = useState(false)
   const [equationLocation, setEquationLocation] = useState<{ line: number; text: string; beforeText: string; afterText: string } | null>(null)
   const [reconnectingDelayMs, setReconnectingDelayMs] = useState<number | null>(null)
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
 
   // Wait for the first Yjs sync so Monaco never binds to an empty CRDT snapshot.
   const [syncedYdoc, setSyncedYdoc] = useState<Y.Doc | null>(null)
@@ -144,6 +148,18 @@ export default function EditorPage() {
         return 'plaintext'
     }
   })()
+
+  const handleHistoryChange = useCallback((history: EditorHistoryState | null) => {
+    historyActionsRef.current = history ? { undo: history.undo, redo: history.redo } : null
+    setCanUndo(history?.canUndo ?? false)
+    setCanRedo(history?.canRedo ?? false)
+  }, [])
+
+  useEffect(() => {
+    historyActionsRef.current = null
+    setCanUndo(false)
+    setCanRedo(false)
+  }, [docId, currentDoc?.kind])
 
   useEffect(() => {
     if (!projectId || !docId) return
@@ -444,6 +460,10 @@ export default function EditorPage() {
         readOnly={readOnly}
         isLatexDoc={isLatexDoc}
         isEditableDoc={isEditableDoc}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={() => historyActionsRef.current?.undo()}
+        onRedo={() => historyActionsRef.current?.redo()}
         viewMode={isLatexDoc ? viewMode : undefined}
         onChangeViewMode={isLatexDoc ? setViewMode : undefined}
       />
@@ -483,6 +503,7 @@ export default function EditorPage() {
                   socket={socketRef.current}
                   onChange={updateDocContent}
                   onDirty={() => setSaveState('saving')}
+                  onHistoryChange={handleHistoryChange}
                 />
               ) : (
                 <Editor
@@ -493,6 +514,7 @@ export default function EditorPage() {
                   onRegisterTextInserter={(fn) => { textInserterRef.current = fn }}
                   onCursorMove={handleOwnCursorMove}
                   onSelectionQuote={(q) => setQuoteForChat(q)}
+                  onHistoryChange={handleHistoryChange}
                   pickingLocation={pickingEquationLocation}
                   onLocationPicked={(loc) => { setEquationLocation(loc); setPickingEquationLocation(false) }}
                   ownUsername={user?.username}

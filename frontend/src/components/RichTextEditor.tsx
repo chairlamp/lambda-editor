@@ -11,8 +11,6 @@ import {
   type LucideIcon,
   List,
   ListOrdered,
-  Redo2,
-  Undo2,
 } from 'lucide-react'
 import { C } from '../design'
 import { type RoomSocket } from '../services/socket'
@@ -23,6 +21,7 @@ interface Props {
   socket?: RoomSocket | null
   onChange: (content: string) => void
   onDirty?: () => void
+  onHistoryChange?: (history: { canUndo: boolean; canRedo: boolean; undo: () => void; redo: () => void } | null) => void
 }
 
 interface ToolbarButton {
@@ -36,7 +35,7 @@ interface ToolbarButton {
 
 const EMPTY_DOC = '<p></p>'
 
-export default function RichTextEditor({ content, readOnly = false, socket = null, onChange, onDirty }: Props) {
+export default function RichTextEditor({ content, readOnly = false, socket = null, onChange, onDirty, onHistoryChange }: Props) {
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const typingActiveRef = useRef(false)
 
@@ -92,21 +91,32 @@ export default function RichTextEditor({ content, readOnly = false, socket = nul
     }
   }, [socket])
 
+  useEffect(() => {
+    if (!onHistoryChange) return
+    if (!editor) {
+      onHistoryChange(null)
+      return
+    }
+
+    const emitHistoryState = () => {
+      onHistoryChange({
+        canUndo: editor.can().chain().focus().undo().run(),
+        canRedo: editor.can().chain().focus().redo().run(),
+        undo: () => { editor.chain().focus().undo().run() },
+        redo: () => { editor.chain().focus().redo().run() },
+      })
+    }
+
+    emitHistoryState()
+    editor.on('transaction', emitHistoryState)
+
+    return () => {
+      editor.off('transaction', emitHistoryState)
+      onHistoryChange(null)
+    }
+  }, [editor, onHistoryChange])
+
   const buttons = useMemo<ToolbarButton[]>(() => [
-    {
-      key: 'undo',
-      label: 'Undo',
-      icon: Undo2,
-      canRun: (instance) => instance.can().chain().focus().undo().run(),
-      run: (instance) => { instance.chain().focus().undo().run() },
-    },
-    {
-      key: 'redo',
-      label: 'Redo',
-      icon: Redo2,
-      canRun: (instance) => instance.can().chain().focus().redo().run(),
-      run: (instance) => { instance.chain().focus().redo().run() },
-    },
     {
       key: 'bold',
       label: 'Bold',

@@ -25,6 +25,7 @@ interface Props {
   onRegisterGetCursorPos?: (fn: () => { lineNumber: number; column: number } | null) => void
   onCursorMove?: (pos: { lineNumber: number; column: number }) => void
   onSelectionQuote?: (quote: { lineStart: number; lineEnd: number; text: string }) => void
+  onHistoryChange?: (history: { canUndo: boolean; canRedo: boolean; undo: () => void; redo: () => void } | null) => void
   pickingLocation?: boolean
   onLocationPicked?: (loc: { line: number; text: string; beforeText: string; afterText: string }) => void
   ownUsername?: string
@@ -50,7 +51,7 @@ const LATEX_SNIPPETS = [
   { label: '\\int', insertText: '\\int_{$1}^{$2}' },
 ]
 
-export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRegisterTextInserter, onRegisterGetCursorPos, onCursorMove, onSelectionQuote, pickingLocation, onLocationPicked, ownUsername, ownColor, language = 'plaintext' }: Props) {
+export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRegisterTextInserter, onRegisterGetCursorPos, onCursorMove, onSelectionQuote, onHistoryChange, pickingLocation, onLocationPicked, ownUsername, ownColor, language = 'plaintext' }: Props) {
   const { currentDoc, updateDocContent, setSaveState, theme } = useStore()
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof Monaco | null>(null)
@@ -74,6 +75,19 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
     monacoRef.current = monaco
     setEditorReady(true)
 
+    const reportHistoryState = () => {
+      const model = editor.getModel() as (Monaco.editor.ITextModel & {
+        canUndo?: () => boolean
+        canRedo?: () => boolean
+      }) | null
+      onHistoryChange?.({
+        canUndo: model?.canUndo?.() ?? false,
+        canRedo: model?.canRedo?.() ?? false,
+        undo: () => editor.trigger('toolbar', 'undo', null),
+        redo: () => editor.trigger('toolbar', 'redo', null),
+      })
+    }
+
     let lastCursorPos: { lineNumber: number; column: number } | null = null
 
     editor.onDidChangeCursorPosition((e) => {
@@ -92,6 +106,10 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
         editor.focus()
       })
     }
+
+    editor.onDidChangeModelContent(reportHistoryState)
+    editor.onDidChangeModel(reportHistoryState)
+    reportHistoryState()
 
     if (onRegisterGetCursorPos) {
       onRegisterGetCursorPos(() => lastCursorPos)
@@ -200,6 +218,12 @@ export default function Editor({ socket, ydoc, readOnly, remoteDecorations, onRe
   }
 
   // Recreate the binding when the backing doc changes so Monaco never points at stale CRDT state.
+  useEffect(() => {
+    return () => {
+      onHistoryChange?.(null)
+    }
+  }, [onHistoryChange])
+
   useEffect(() => {
     bindingRef.current?.destroy()
     bindingRef.current = null
