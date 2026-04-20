@@ -15,6 +15,9 @@ from app.services.prompts import AGENT_SYSTEM_PROMPT, RESEARCH_SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 LANGUAGE_CODE_MAP = {
+    "amaharic": "am",
+    "amharic": "am",
+    "amharic language": "am",
     "arabic": "ar",
     "chinese": "zh-CN",
     "english": "en",
@@ -152,7 +155,22 @@ def _describe_language(language: str) -> str:
 def _detect_translation_request(prompt: str) -> Optional[dict[str, str]]:
     text = prompt.strip()
     lowered = text.lower()
-    if "translate" not in lowered:
+    prompt_without_quotes = text
+    quote_blocks: list[str] = []
+    while prompt_without_quotes.startswith("[Quote from "):
+        newline_index = prompt_without_quotes.find("\n")
+        if newline_index == -1:
+            break
+        remainder = prompt_without_quotes[newline_index + 1 :]
+        separator = remainder.find("\n\n")
+        if separator == -1:
+            quote_blocks.append(remainder.strip())
+            prompt_without_quotes = ""
+            break
+        quote_blocks.append(remainder[:separator].strip())
+        prompt_without_quotes = remainder[separator + 2 :].lstrip()
+    quoted_text = "\n\n".join(block for block in quote_blocks if block)
+    if "translate" not in lowered and not quoted_text:
         return None
 
     quoted_match = re.search(
@@ -194,6 +212,22 @@ def _detect_translation_request(prompt: str) -> Optional[dict[str, str]]:
                     "text": candidate_text,
                     "target_language": _normalize_language_code(first_line_match.group("lang")),
                 }
+
+    if quoted_text:
+        bare_language = prompt_without_quotes.strip()
+        if bare_language:
+            simple_language_match = re.fullmatch(
+                r"""(?:(?:translate|translation)\s+)?(?:(?:to|into)\s+)?([A-Za-z][A-Za-z\-\s]{1,40})\??""",
+                bare_language,
+                re.IGNORECASE,
+            )
+            if simple_language_match:
+                language = _normalize_language_code(simple_language_match.group(1))
+                if language:
+                    return {
+                        "text": quoted_text,
+                        "target_language": language,
+                    }
 
     return None
 

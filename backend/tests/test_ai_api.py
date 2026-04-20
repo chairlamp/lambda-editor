@@ -624,6 +624,24 @@ async def test_translation_diff_falls_back_to_llm_when_google_translate_is_not_c
     assert assistant_message["diff"]["changes"][0]["new_text"] == "Introduccion"
 
 
+def test_normalize_language_code_supports_amharic_aliases():
+    assert agent_service._normalize_language_code("amharic") == "am"
+    assert agent_service._normalize_language_code("Amaharic") == "am"
+    assert agent_service._normalize_language_code("to amharic") == "am"
+
+
+def test_detect_translation_request_supports_quoted_text_with_language_only_prompt():
+    prompt = (
+        "[Quote from main.tex:40-46]\n"
+        "Este estudio examina relaciones diplomaticas.\n\n"
+        "amharic"
+    )
+    assert agent_service._detect_translation_request(prompt) == {
+        "text": "Este estudio examina relaciones diplomaticas.",
+        "target_language": "am",
+    }
+
+
 async def test_failed_translation_diff_is_persisted_when_translate_provider_is_not_configured(client, monkeypatch):
     await _register(client, "owner-translate@example.com", "owner-translate")
     project = await _create_project(client, "Translate Failure")
