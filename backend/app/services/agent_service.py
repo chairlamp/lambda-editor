@@ -10,6 +10,7 @@ from typing import Any, Optional
 import httpx
 
 from app.config import settings
+from app.services.llm import get_provider
 from app.services.prompts import AGENT_SYSTEM_PROMPT, RESEARCH_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,24 @@ LANGUAGE_CODE_MAP = {
     "uzbek": "uz",
 }
 
-LANGUAGE_LABEL_MAP = {code: language.title() for language, code in LANGUAGE_CODE_MAP.items()}
+LANGUAGE_LABEL_MAP = {
+    "am": "Amharic",
+    "ar": "Arabic",
+    "zh-CN": "Chinese",
+    "en": "English",
+    "fr": "French",
+    "de": "German",
+    "it": "Italian",
+    "ja": "Japanese",
+    "kk": "Kazakh",
+    "ko": "Korean",
+    "pt": "Portuguese",
+    "ru": "Russian",
+    "es": "Spanish",
+    "tr": "Turkish",
+    "uk": "Ukrainian",
+    "uz": "Uzbek",
+}
 
 LLM_TRANSLATION_SYSTEM_PROMPT = """You translate text inside a collaborative LaTeX editor.
 
@@ -626,23 +644,38 @@ async def _translate_text_with_llm(masked_text: str, target_language: str) -> di
         return {"error": "GOOGLE_TRANSLATE_API_KEY is not configured, and no LLM translation fallback is available."}
 
     language_hint = _describe_language(target_language) or target_language
-    response_json = await _responses_create({
-        "model": settings.llm_model,
-        "instructions": LLM_TRANSLATION_SYSTEM_PROMPT,
-        "input": [{
-            "role": "user",
-            "content": [{
-                "type": "input_text",
-                "text": (
-                    f"Translate the following text to {language_hint}.\n"
-                    "Return only the translated text.\n\n"
-                    f"{masked_text}"
-                ),
+    translation_prompt = (
+        f"Translate the following text to {language_hint}.\n"
+        "Return only the translated text.\n\n"
+        f"{masked_text}"
+    )
+    translated = ""
+    try:
+        response_json = await _responses_create({
+            "model": settings.llm_model,
+            "instructions": LLM_TRANSLATION_SYSTEM_PROMPT,
+            "input": [{
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": translation_prompt,
+                }],
             }],
-        }],
-    })
-    translated, _, _ = _extract_text_and_sources(response_json)
+        })
+        translated, _, _ = _extract_text_and_sources(response_json)
+    except Exception:
+        translated = ""
+
     translated = translated.strip()
+    if not translated:
+        messages = [
+            {"role": "system", "content": LLM_TRANSLATION_SYSTEM_PROMPT},
+            {"role": "user", "content": translation_prompt},
+        ]
+        chunks: list[str] = []
+        async for chunk in get_provider().stream_completion(messages, max_tokens=2000):
+            chunks.append(chunk)
+        translated = "".join(chunks).strip()
     if not translated:
         return {"error": f"{settings.llm_provider.title()} translation returned an empty response."}
     return {"translation": translated}

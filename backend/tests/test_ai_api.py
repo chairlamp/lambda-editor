@@ -685,6 +685,44 @@ async def test_translation_diff_falls_back_to_llm_when_google_translate_is_not_c
     assert assistant_message["diff"]["changes"][0]["new_text"] == "Introduccion"
 
 
+async def test_translation_diff_falls_back_to_provider_stream_when_responses_api_is_empty(client, monkeypatch):
+    await _register(client, "owner-translate-stream@example.com", "owner-translate-stream")
+    project = await _create_project(client, "Translate Stream Fallback")
+
+    monkeypatch.setattr(settings, "GOOGLE_TRANSLATE_API_KEY", "")
+
+    async def fake_responses_create(_payload: dict):
+        return {"output": []}
+
+    class FakeProvider:
+        async def stream_completion(self, messages: list[dict], max_tokens: int = 2000):
+            assert messages[0]["role"] == "system"
+            assert messages[1]["role"] == "user"
+            assert "Amharic (am)" in messages[1]["content"]
+            assert "Introduction" in messages[1]["content"]
+            yield "መግቢያ"
+
+    monkeypatch.setattr(agent_service, "_responses_create", fake_responses_create)
+    monkeypatch.setattr(agent_service, "get_provider", lambda: FakeProvider())
+
+    doc_response = await client.get(f"/projects/{project['id']}/documents/{project['main_doc_id']}")
+    assert doc_response.status_code == 200
+
+    diff_response = await client.post(
+        f"/projects/{project['id']}/documents/{project['main_doc_id']}/ai/translation-suggestions",
+        json={
+            "language": "amharic",
+            "text": "Introduction",
+            "document_content": doc_response.json()["content"],
+            "action_id": "act-translate-stream",
+        },
+    )
+    assert diff_response.status_code == 200
+    payload = diff_response.json()
+    assert payload["changes"][0]["new_text"] == "መግቢያ"
+    assert payload["status"] == "completed"
+
+
 def test_normalize_language_code_supports_amharic_aliases():
     assert agent_service._normalize_language_code("amharic") == "am"
     assert agent_service._normalize_language_code("Amaharic") == "am"
