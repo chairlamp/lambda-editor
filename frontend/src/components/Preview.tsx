@@ -231,20 +231,6 @@ export default function Preview({ onClose, socket }: Props) {
               }}
               title="PDF Preview"
             />
-            {/* Mask the noisy generated filename while preserving the viewer toolbar controls. */}
-            <div
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: 360,
-                maxWidth: '48%',
-                height: 36,
-                background: '#3c4043',
-                borderTopLeftRadius: 12,
-                pointerEvents: 'none',
-              }}
-            />
           </div>
         ) : (
           <div style={{
