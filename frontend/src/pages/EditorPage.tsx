@@ -456,6 +456,7 @@ export default function EditorPage() {
         showAI={showAI}
         showVersionHistory={showVersionHistory}
         onToggleVersionHistory={() => setShowVersionHistory((v) => !v)}
+        socket={socketRef.current}
         projectId={projectId}
         readOnly={readOnly}
         isLatexDoc={isLatexDoc}
@@ -539,7 +540,7 @@ export default function EditorPage() {
               />
             )}
             <div style={showEditorPane ? { width: previewWidth, flexShrink: 0, overflow: 'hidden' } : { flex: 1, minWidth: 0, overflow: 'hidden' }}>
-              <Preview socket={socketRef.current} onClose={() => setViewMode('editor')} />
+              <Preview onClose={() => setViewMode('editor')} />
             </div>
           </>
         )}

@@ -1,17 +1,19 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Save, Wifi, WifiOff, Loader2, History, ArrowLeft, Bot, Eye, Lock, Link, Copy, Check, Trash2, Plus, X, Users, UserPlus, CloudOff, Cloud, AlertTriangle, Undo2, Redo2 } from 'lucide-react'
+import { Save, Wifi, WifiOff, Loader2, History, ArrowLeft, Bot, Eye, Lock, Link, Copy, Check, Trash2, Plus, X, Users, UserPlus, CloudOff, Cloud, AlertTriangle, Undo2, Redo2, FileText, Download, ChevronDown, CheckCircle } from 'lucide-react'
 import { useStore, Presence } from '../store/useStore'
-import { authApi, docsApi, projectsApi } from '../services/api'
+import { authApi, compileApi, docsApi, projectsApi } from '../services/api'
 import { C } from '../design'
 import ThemeToggle from './ThemeToggle'
 import { createSaveFingerprint, saveEventMatchesContent } from '../utils/save-state'
+import { RoomSocket } from '../services/socket'
 
 interface Props {
   onToggleAI: () => void
   showAI: boolean
   showVersionHistory: boolean
   onToggleVersionHistory: () => void
+  socket?: RoomSocket | null
   projectId?: string
   readOnly?: boolean
   isLatexDoc?: boolean
@@ -39,6 +41,27 @@ interface Member {
   role: string
 }
 
+type ExportFormat = 'pdf' | 'dvi' | 'ps'
+
+const EXPORT_FORMATS: ExportFormat[] = ['pdf', 'dvi', 'ps']
+
+function base64ToBlob(base64: string, mimeType: string) {
+  const binary = atob(base64)
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+  return new Blob([bytes], { type: mimeType })
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
 function Avatar({ p }: { p: Presence }) {
   return (
     <div title={`${p.username}${p.read_only ? ' (viewer)' : ''}`} style={{
@@ -56,12 +79,16 @@ function Avatar({ p }: { p: Presence }) {
 export default function Toolbar({
   onToggleAI, showAI,
   showVersionHistory, onToggleVersionHistory,
+  socket = null,
   projectId, readOnly, isLatexDoc = true, isEditableDoc = true,
   canUndo = false, canRedo = false, onUndo, onRedo,
   viewMode, onChangeViewMode,
 }: Props) {
   const navigate = useNavigate()
-  const { currentDoc, currentProject, user, isConnected, presence, logout, saveStatus, saveError, typingUsers, setSaveState, updateDocSyncState } = useStore()
+  const {
+    currentDoc, currentProject, user, isConnected, presence, logout, saveStatus, saveError, typingUsers,
+    compiledPdf, compileLog, isCompiling, setSaveState, updateDocSyncState, setCompiledPdf, setCompiling,
+  } = useStore()
   const [saving, setSaving] = useState(false)
   const [showAddMember, setShowAddMember] = useState(false)
   const [addMemberInput, setAddMemberInput] = useState('')
@@ -77,6 +104,8 @@ export default function Toolbar({
   const [showMembers, setShowMembers] = useState(false)
   const [members, setMembers] = useState<Member[]>([])
   const [membersLoading, setMembersLoading] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [showExportMenu, setShowExportMenu] = useState(false)
 
   const saveDoc = async () => {
     if (!currentDoc || !projectId || saving || readOnly) return
@@ -182,17 +211,60 @@ export default function Toolbar({
   }
 
   const isOwner = currentProject?.my_role === 'owner'
+  const showEditorControls = isEditableDoc || isLatexDoc
   const currentDocBadge = currentDoc?.kind === 'latex'
     ? { background: C.accentSubtle, color: C.accent, border: C.accentBorder }
     : currentDoc?.kind === 'richtext'
       ? { background: C.greenSubtle, color: C.green, border: 'rgba(34,197,94,0.25)' }
       : { background: C.blueSubtle, color: C.blue, border: 'rgba(96,165,250,0.25)' }
 
+  const compilePdf = async () => {
+    if (!currentDoc?.content || isCompiling) return
+    setCompiling(true)
+    setShowExportMenu(false)
+    try {
+      const res = await compileApi.compile(currentDoc.content, currentDoc.project_id, currentDoc.id, 'pdf')
+      const { success, pdf_base64, log } = res.data
+      setCompiledPdf(success ? pdf_base64 : null, log)
+      socket?.sendCompileResult({ success, pdf_base64: success ? pdf_base64 : null, log })
+    } catch (e: any) {
+      const log = e?.response?.data?.detail || 'Compilation failed'
+      setCompiledPdf(null, log)
+      socket?.sendCompileResult({ success: false, pdf_base64: null, log })
+    } finally {
+      setCompiling(false)
+    }
+  }
+
+  const exportRenderedFile = async (exportFormat: ExportFormat) => {
+    if (!currentDoc?.content || isExporting) return
+    setIsExporting(true)
+    setShowExportMenu(false)
+    try {
+      const res = await compileApi.compile(currentDoc.content, currentDoc.project_id, currentDoc.id, exportFormat)
+      const { success, file_base64, file_name, mime_type, log } = res.data
+      if (!success || !file_base64 || !file_name || !mime_type) {
+        setCompiledPdf(compiledPdf, log || 'Export failed')
+        return
+      }
+      downloadBlob(base64ToBlob(file_base64, mime_type), file_name)
+      if (exportFormat === 'pdf') {
+        setCompiledPdf(file_base64, log || '')
+        socket?.sendCompileResult({ success: true, pdf_base64: file_base64, log: log || '' })
+      }
+    } catch (e: any) {
+      const log = e?.response?.data?.detail || 'Export failed'
+      setCompiledPdf(compiledPdf, log)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   return (
     <>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px',
-        height: 46, background: C.bgRaised, borderBottom: `1px solid ${C.borderFaint}`,
+        height: 46, background: C.bgRaised, borderBottom: showEditorControls ? `1px solid ${C.borderFaint}` : `1px solid ${C.borderFaint}`,
         flexShrink: 0,
       }}>
         {/* Back + breadcrumb */}
@@ -297,66 +369,6 @@ export default function Toolbar({
 
         <div style={{ flex: 1 }} />
 
-        {isLatexDoc && viewMode && onChangeViewMode && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 3,
-            padding: 3,
-            borderRadius: 9,
-            border: `1px solid ${C.border}`,
-            background: C.bgBase,
-          }}>
-            {([
-              ['editor', 'Code'],
-              ['split', 'Split'],
-              ['preview', 'Preview'],
-            ] as const).map(([mode, label]) => {
-              const active = viewMode === mode
-              return (
-                <button
-                  key={mode}
-                  onClick={() => onChangeViewMode(mode)}
-                  style={{
-                    padding: '5px 10px',
-                    borderRadius: 7,
-                    border: 'none',
-                    background: active ? C.accentSubtle : 'transparent',
-                    color: active ? C.accent : C.textSecondary,
-                    fontSize: 11.5,
-                    fontWeight: active ? 600 : 500,
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  {label}
-                </button>
-              )
-            })}
-          </div>
-        )}
-
-        {isEditableDoc && !readOnly && (
-          <>
-            <button
-              onClick={onUndo}
-              disabled={!canUndo}
-              style={{ ...iconBtn, opacity: canUndo ? 1 : 0.45, cursor: canUndo ? 'pointer' : 'not-allowed' }}
-              title="Undo (Ctrl/Cmd+Z)"
-            >
-              <Undo2 size={14} />
-            </button>
-            <button
-              onClick={onRedo}
-              disabled={!canRedo}
-              style={{ ...iconBtn, opacity: canRedo ? 1 : 0.45, cursor: canRedo ? 'pointer' : 'not-allowed' }}
-              title="Redo (Ctrl/Cmd+Shift+Z)"
-            >
-              <Redo2 size={14} />
-            </button>
-          </>
-        )}
-
         {/* Action buttons */}
         {isLatexDoc && !showAI && (
           <button onClick={onToggleAI} style={iconBtn} title="Open AI Assistant">
@@ -419,6 +431,155 @@ export default function Toolbar({
           </button>
         </div>
       </div>
+
+      {showEditorControls && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          minHeight: 42,
+          padding: '0 12px',
+          background: C.bgCard,
+          borderBottom: `1px solid ${C.borderFaint}`,
+          flexShrink: 0,
+        }}>
+          {isEditableDoc && (
+            <div style={controlGroup}>
+              <button
+                onClick={onUndo}
+                disabled={readOnly || !canUndo}
+                style={{ ...toolbarActionBtn, opacity: !readOnly && canUndo ? 1 : 0.45, cursor: !readOnly && canUndo ? 'pointer' : 'not-allowed' }}
+                title="Undo (Ctrl/Cmd+Z)"
+              >
+                <Undo2 size={14} />
+                Undo
+              </button>
+              <button
+                onClick={onRedo}
+                disabled={readOnly || !canRedo}
+                style={{ ...toolbarActionBtn, opacity: !readOnly && canRedo ? 1 : 0.45, cursor: !readOnly && canRedo ? 'pointer' : 'not-allowed' }}
+                title="Redo (Ctrl/Cmd+Shift+Z)"
+              >
+                <Redo2 size={14} />
+                Redo
+              </button>
+            </div>
+          )}
+
+          {isLatexDoc && viewMode && onChangeViewMode && (
+            <div style={segmentedGroup}>
+              {([
+                ['editor', 'Code'],
+                ['split', 'Split'],
+                ['preview', 'Preview'],
+              ] as const).map(([mode, label]) => {
+                const active = viewMode === mode
+                return (
+                  <button
+                    key={mode}
+                    onClick={() => onChangeViewMode(mode)}
+                    style={{
+                      padding: '5px 10px',
+                      borderRadius: 7,
+                      border: 'none',
+                      background: active ? C.accentSubtle : 'transparent',
+                      color: active ? C.accent : C.textSecondary,
+                      fontSize: 11.5,
+                      fontWeight: active ? 600 : 500,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {isLatexDoc && (
+            <>
+              <div style={controlGroup}>
+                <button
+                  onClick={compilePdf}
+                  disabled={isCompiling || !currentDoc}
+                  style={{
+                    ...primaryToolbarBtn,
+                    opacity: isCompiling || !currentDoc ? 0.55 : 1,
+                    cursor: isCompiling || !currentDoc ? 'not-allowed' : 'pointer',
+                  }}
+                  title="Render PDF"
+                >
+                  {isCompiling ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <FileText size={13} />}
+                  {isCompiling ? 'Rendering…' : 'Render PDF'}
+                </button>
+
+                <div style={{ position: 'relative' }}>
+                  <button
+                    onClick={() => !isExporting && setShowExportMenu((v) => !v)}
+                    disabled={isExporting || !currentDoc}
+                    style={{
+                      ...toolbarActionBtn,
+                      opacity: isExporting || !currentDoc ? 0.55 : 1,
+                      cursor: isExporting || !currentDoc ? 'not-allowed' : 'pointer',
+                    }}
+                    title="Export rendered file"
+                  >
+                    {isExporting ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Download size={13} />}
+                    Export
+                    <ChevronDown size={12} />
+                  </button>
+
+                  {showExportMenu && !isExporting && currentDoc && (
+                    <div style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 6px)',
+                      left: 0,
+                      minWidth: 150,
+                      background: C.bgCard,
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 8,
+                      boxShadow: '0 12px 30px rgba(15,23,42,0.18)',
+                      overflow: 'hidden',
+                      zIndex: 20,
+                    }}>
+                      {EXPORT_FORMATS.map((format) => (
+                        <button
+                          key={format}
+                          onClick={() => void exportRenderedFile(format)}
+                          style={exportMenuBtn}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = C.bgHover; e.currentTarget.style.color = C.textPrimary }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.textSecondary }}
+                        >
+                          Export {format.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {isCompiling ? (
+                <span style={statusChip(C.textMuted, C.bgSurface)}>
+                  <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Rendering…
+                </span>
+              ) : compiledPdf ? (
+                <span style={statusChip(C.green, C.greenSubtle)}>
+                  <CheckCircle size={11} /> PDF ready
+                </span>
+              ) : compileLog ? (
+                <span style={statusChip(C.red, C.redSubtle)}>
+                  <AlertTriangle size={11} /> Needs attention
+                </span>
+              ) : (
+                <span style={statusChip(C.textMuted, C.bgSurface)}>
+                  Preview controls
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* ── Invite links modal ── */}
       {showInvites && (
@@ -619,11 +780,57 @@ const modalHeader: React.CSSProperties = {
 const modalTitle: React.CSSProperties = {
   fontSize: 14, fontWeight: 600, color: C.textPrimary, margin: 0,
 }
+const controlGroup: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+}
+const segmentedGroup: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 3,
+  padding: 3,
+  borderRadius: 9,
+  border: `1px solid ${C.border}`,
+  background: C.bgBase,
+}
 const iconBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
   width: 28, height: 28, borderRadius: 6, border: `1px solid ${C.border}`,
   background: 'transparent', color: C.textSecondary, cursor: 'pointer',
   transition: 'all 0.12s', flexShrink: 0,
+}
+const toolbarActionBtn: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  height: 30,
+  padding: '0 11px',
+  borderRadius: 7,
+  border: `1px solid ${C.border}`,
+  background: C.bgBase,
+  color: C.textSecondary,
+  fontSize: 11.5,
+  fontFamily: 'inherit',
+  cursor: 'pointer',
+}
+const primaryToolbarBtn: React.CSSProperties = {
+  ...toolbarActionBtn,
+  border: 'none',
+  background: C.accent,
+  color: '#fff',
+}
+const exportMenuBtn: React.CSSProperties = {
+  display: 'flex',
+  width: '100%',
+  alignItems: 'center',
+  padding: '9px 13px',
+  background: 'transparent',
+  border: 'none',
+  color: C.textSecondary,
+  fontSize: 12.5,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
 }
 const inputSt: React.CSSProperties = {
   width: '100%', background: C.bgBase, border: `1px solid ${C.border}`,
@@ -640,4 +847,19 @@ const primaryBtn: React.CSSProperties = {
   width: '100%', padding: '9px', borderRadius: 7, border: 'none',
   background: C.accent, color: '#fff', fontSize: 13, cursor: 'pointer',
   fontWeight: 500, fontFamily: 'inherit',
+}
+
+function statusChip(color: string, background: string): React.CSSProperties {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 5,
+    padding: '5px 9px',
+    borderRadius: 999,
+    border: `1px solid ${color}22`,
+    background,
+    color,
+    fontSize: 11.5,
+    fontWeight: 500,
+  }
 }
