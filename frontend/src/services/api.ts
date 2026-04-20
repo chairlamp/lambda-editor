@@ -163,6 +163,8 @@ export const aiChatApi = {
   }, signal?: AbortSignal) => api.post(`/projects/${projectId}/documents/${docId}/ai/messages`, payload, { signal }),
   threads: (projectId: string, docId: string) =>
     api.get(`/projects/${projectId}/documents/${docId}/ai/threads`),
+  deleteThread: (projectId: string, docId: string, threadId: string) =>
+    api.delete(`/projects/${projectId}/documents/${docId}/ai/threads/${encodeURIComponent(threadId)}`),
   history: (projectId: string, docId: string, threadId?: string) =>
     api.get(`/projects/${projectId}/documents/${docId}/ai/messages`, {
       params: threadId ? { thread_id: threadId } : undefined,

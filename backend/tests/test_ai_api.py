@@ -292,6 +292,67 @@ async def test_ai_history_supports_threads_and_thread_summaries(client, monkeypa
     assert summaries[0]["message_count"] == 2
 
 
+async def test_ai_threads_can_be_deleted(client, monkeypatch):
+    await _register(client, "thread-delete@example.com", "thread-delete")
+    project = await _create_project(client, "AI Thread Delete")
+
+    async def fake_suggest_changes(instruction: str, document_content: str, variation_request: str = ""):
+        return {
+            "explanation": f"Suggestion for {instruction}",
+            "changes": [
+                {
+                    "id": f"change-{instruction}",
+                    "description": f"Rewrite for {instruction}",
+                    "old_text": "Introduction",
+                    "new_text": instruction,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(ai_service, "suggest_changes", fake_suggest_changes)
+
+    doc_response = await client.get(f"/projects/{project['id']}/documents/{project['main_doc_id']}")
+    assert doc_response.status_code == 200
+    content = doc_response.json()["content"]
+
+    for thread_id, instruction in (("thread-1", "Keep me"), ("thread-2", "Delete me")):
+        response = await client.post(
+            f"/projects/{project['id']}/documents/{project['main_doc_id']}/ai/change-suggestions",
+            json={
+                "instruction": instruction,
+                "document_content": content,
+                "action_id": f"act-{thread_id}",
+                "thread_id": thread_id,
+            },
+        )
+        assert response.status_code == 200
+
+    delete_response = await client.delete(
+        f"/projects/{project['id']}/documents/{project['main_doc_id']}/ai/threads/thread-2"
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"ok": True, "deleted": 2}
+
+    threads_response = await client.get(
+        f"/projects/{project['id']}/documents/{project['main_doc_id']}/ai/threads"
+    )
+    assert threads_response.status_code == 200
+    assert [summary["id"] for summary in threads_response.json()] == ["thread-1"]
+
+    deleted_history_response = await client.get(
+        f"/projects/{project['id']}/documents/{project['main_doc_id']}/ai/messages",
+        params={"thread_id": "thread-2"},
+    )
+    assert deleted_history_response.status_code == 200
+    assert deleted_history_response.json() == []
+
+    missing_delete_response = await client.delete(
+        f"/projects/{project['id']}/documents/{project['main_doc_id']}/ai/threads/thread-2"
+    )
+    assert missing_delete_response.status_code == 404
+    assert missing_delete_response.json()["detail"] == "Thread not found"
+
+
 async def _drain(response) -> str:
     body = ""
     async for piece in response.body_iterator:

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const apiMocks = vi.hoisted(() => ({
   threads: vi.fn(),
+  deleteThread: vi.fn(),
   history: vi.fn(),
   updateReviewState: vi.fn(),
   agent: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock("../services/api", () => ({
   },
   aiChatApi: {
     threads: apiMocks.threads,
+    deleteThread: apiMocks.deleteThread,
     history: apiMocks.history,
     updateReviewState: apiMocks.updateReviewState,
     agent: apiMocks.agent,
@@ -73,6 +75,7 @@ describe("AIChat cancellation", () => {
       ],
     });
     apiMocks.history.mockResolvedValue({ data: [] });
+    apiMocks.deleteThread.mockResolvedValue({ data: { ok: true, deleted: 2 } });
     apiMocks.updateReviewState.mockResolvedValue({ data: { ok: true } });
     apiMocks.agent.mockResolvedValue({ data: { content: "", status: "completed" } });
     Object.defineProperty(Element.prototype, "scrollIntoView", {
@@ -288,5 +291,44 @@ describe("AIChat cancellation", () => {
     });
 
     expect(screen.getAllByText("New chat").length).toBeGreaterThan(0);
+  });
+
+  it("deletes a thread from history", async () => {
+    apiMocks.threads.mockResolvedValue({
+      data: [
+        {
+          id: "thread-1",
+          title: "Recent chat",
+          preview: "Previous conversation",
+          message_count: 2,
+          updated_at: "2026-04-20T10:00:00Z",
+        },
+        {
+          id: "thread-2",
+          title: "Older chat",
+          preview: "Something old",
+          message_count: 4,
+          updated_at: "2026-04-20T09:00:00Z",
+        },
+      ],
+    });
+
+    render(<AIChat socket={null} readOnly={false} currentDocTitle="main.tex" />);
+
+    await waitFor(() => {
+      expect(apiMocks.history).toHaveBeenCalledWith("proj-1", "doc-1", "thread-1");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /history/i }));
+    expect(screen.getByText("Older chat")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /delete conversation older chat/i }));
+
+    await waitFor(() => {
+      expect(apiMocks.deleteThread).toHaveBeenCalledWith("proj-1", "doc-1", "thread-2");
+    });
+
+    expect(screen.queryByText("Older chat")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Recent chat").length).toBeGreaterThan(0);
   });
 });

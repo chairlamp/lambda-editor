@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Bot, Loader2, RefreshCw, AlignLeft,
   X, FileText, MapPin,
-  ArrowRight, Square, History, PlusSquare,
+  ArrowRight, Square, History, PlusSquare, Trash2,
 } from 'lucide-react'
 import { aiChatApi, streamAI } from '../services/api'
 import api from '../services/api'
@@ -77,6 +77,7 @@ export default function AIChat({
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [deletingThreadId, setDeletingThreadId] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const [threadSummaries, setThreadSummaries] = useState<ChatThreadSummary[]>([])
   const [activeThreadId, setActiveThreadId] = useState('')
@@ -637,6 +638,37 @@ export default function AIChat({
     openThread(threadId)
   }, [loading, openThread])
 
+  const deleteThread = useCallback(async (thread: ChatThreadSummary) => {
+    if (loading || deletingThreadId) return
+    const currentProjectId = currentDoc?.project_id
+    const currentDocId = currentDoc?.id
+    if (!currentProjectId || !currentDocId) return
+
+    const remainingThreads = threadSummaries.filter((entry) => entry.id !== thread.id)
+    const nextActiveThread = remainingThreads[0]
+
+    if (thread.localOnly) {
+      setThreadSummaries(sortThreads(remainingThreads))
+      if (thread.id === activeThreadId) {
+        if (nextActiveThread) openThread(nextActiveThread.id)
+        else startNewChat()
+      }
+      return
+    }
+
+    setDeletingThreadId(thread.id)
+    try {
+      await aiChatApi.deleteThread(currentProjectId, currentDocId, thread.id)
+      setThreadSummaries(sortThreads(remainingThreads))
+      if (thread.id === activeThreadId) {
+        if (nextActiveThread) openThread(nextActiveThread.id)
+        else startNewChat()
+      }
+    } finally {
+      setDeletingThreadId('')
+    }
+  }, [activeThreadId, currentDoc?.id, currentDoc?.project_id, deletingThreadId, loading, openThread, startNewChat, threadSummaries])
+
   const hydrateAssistantMessage = useCallback(async (responseId: string) => {
     if (!currentDoc?.project_id || !currentDoc?.id || !activeThreadIdRef.current) return
     try {
@@ -1139,41 +1171,72 @@ export default function AIChat({
             ) : (
               threadSummaries.map((thread) => {
                 const active = thread.id === activeThreadId
+                const isDeleting = deletingThreadId === thread.id
                 return (
-                  <button
+                  <div
                     key={thread.id}
-                    onClick={() => openThread(thread.id)}
                     style={{
-                      textAlign: 'left',
                       display: 'flex',
-                      flexDirection: 'column',
-                      gap: 3,
-                      padding: '8px 10px',
-                      borderRadius: 8,
-                      border: `1px solid ${active ? C.accentBorder : C.border}`,
-                      background: active ? C.accentSubtle : C.bgRaised,
-                      cursor: loading ? 'default' : 'pointer',
-                      opacity: loading ? 0.5 : 1,
+                      alignItems: 'stretch',
+                      gap: 6,
                     }}
-                    disabled={loading}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: active ? C.accent : C.textPrimary, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                        {thread.title}
-                      </span>
-                      <span style={{ fontSize: 10, color: C.textMuted, flexShrink: 0 }}>
-                        {formatThreadTime(thread.updatedAt || thread.createdAt)}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 11, color: C.textSecondary, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                        {thread.preview}
-                      </span>
-                      <span style={{ fontSize: 10, color: C.textMuted, flexShrink: 0 }}>
-                        {thread.messageCount} msg{thread.messageCount === 1 ? '' : 's'}
-                      </span>
-                    </div>
-                  </button>
+                    <button
+                      onClick={() => openThread(thread.id)}
+                      style={{
+                        textAlign: 'left',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 3,
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: `1px solid ${active ? C.accentBorder : C.border}`,
+                        background: active ? C.accentSubtle : C.bgRaised,
+                        cursor: loading || isDeleting ? 'default' : 'pointer',
+                        opacity: loading || isDeleting ? 0.5 : 1,
+                        flex: 1,
+                      }}
+                      disabled={loading || isDeleting}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: active ? C.accent : C.textPrimary, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                          {thread.title}
+                        </span>
+                        <span style={{ fontSize: 10, color: C.textMuted, flexShrink: 0 }}>
+                          {formatThreadTime(thread.updatedAt || thread.createdAt)}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11, color: C.textSecondary, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                          {thread.preview}
+                        </span>
+                        <span style={{ fontSize: 10, color: C.textMuted, flexShrink: 0 }}>
+                          {thread.messageCount} msg{thread.messageCount === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => void deleteThread(thread)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 34,
+                        borderRadius: 8,
+                        border: `1px solid ${C.border}`,
+                        background: C.bgRaised,
+                        color: C.textMuted,
+                        cursor: loading || isDeleting ? 'default' : 'pointer',
+                        opacity: loading || isDeleting ? 0.5 : 1,
+                        flexShrink: 0,
+                      }}
+                      disabled={loading || isDeleting}
+                      title={`Delete conversation "${thread.title}"`}
+                      aria-label={`Delete conversation ${thread.title}`}
+                    >
+                      {isDeleting ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Trash2 size={12} />}
+                    </button>
+                  </div>
                 )
               })
             )}

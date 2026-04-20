@@ -1336,6 +1336,33 @@ async def get_threads(
     return _build_thread_summaries(result.all(), doc_id)
 
 
+@router.delete("/projects/{project_id}/documents/{doc_id}/ai/threads/{thread_id}")
+async def delete_thread(
+    project_id: str,
+    doc_id: str,
+    thread_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _purge_ai_history(db, doc_id=doc_id)
+    await _require_document_edit_access(project_id, doc_id, current_user.id, db)
+    resolved_thread_id = _resolve_thread_id(doc_id, thread_id)
+    result = await db.execute(
+        select(AIChatMessage).where(
+            AIChatMessage.document_id == doc_id,
+            AIChatMessage.thread_id == resolved_thread_id,
+        )
+    )
+    messages = result.scalars().all()
+    if not messages:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    for message in messages:
+        await db.delete(message)
+    await db.commit()
+    return {"ok": True, "deleted": len(messages)}
+
+
 @router.get("/projects/{project_id}/documents/{doc_id}/ai/messages", response_model=list[ChatHistoryMessageResponse])
 async def get_history(
     project_id: str,
